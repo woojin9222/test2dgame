@@ -40,7 +40,8 @@ export class GameScene extends Phaser.Scene {
 
   // ─── Phaser objects ──────────────────────────────────────────────────────────
   private _tileGfx!: Phaser.GameObjects.Graphics
-  private _ghostGfx!: Phaser.GameObjects.Graphics  // 건축 미리보기
+  private _ghostGfx!: Phaser.GameObjects.Graphics    // 건축 미리보기
+  private _designGfx!: Phaser.GameObjects.Graphics   // 지정 영역 선택
 
   // ─── Entity tracking ─────────────────────────────────────────────────────────
   private _resourceEids: Set<number> = new Set()
@@ -58,6 +59,10 @@ export class GameScene extends Phaser.Scene {
   private _dragStart: { tx: number; ty: number } | null = null
   private _dragging = false
 
+  // ─── Designate drag ──────────────────────────────────────────────────────────
+  private _designating = false
+  private _designStart: { wx: number; wy: number } | null = null
+
   constructor() { super('Game') }
 
   // ─── Lifecycle ────────────────────────────────────────────────────────────────
@@ -73,6 +78,9 @@ export class GameScene extends Phaser.Scene {
 
     this._ghostGfx = this.add.graphics()
     this._ghostGfx.setDepth(10)
+
+    this._designGfx = this.add.graphics()
+    this._designGfx.setDepth(9)
 
     this._spawnResources()
     this._spawnColonists()
@@ -111,6 +119,7 @@ export class GameScene extends Phaser.Scene {
 
     // ── Build mode ghost preview ──────────────────────────────────────────────
     this._updateGhost()
+    this._updateDesignBox()
   }
 
   // ─── World rendering ─────────────────────────────────────────────────────────
@@ -268,7 +277,9 @@ export class GameScene extends Phaser.Scene {
         }
         if (p.rightButtonDown()) {
           if (this.activeBuildKind !== -1) { this.exitBuildMode(); return }
-          this._onRightClick(p)
+          // 드래그 지정 시작
+          this._designating = true
+          this._designStart = { wx: p.worldX, wy: p.worldY }
         }
         if (p.leftButtonDown()) {
           if (this.activeBuildKind !== -1) {
@@ -328,6 +339,22 @@ export class GameScene extends Phaser.Scene {
         this._dragging  = false
       }
 
+      // Designate drag confirm (right-click up)
+      if (this._designating && this._designStart) {
+        const dx = Math.abs(p.worldX - this._designStart.wx)
+        const dy = Math.abs(p.worldY - this._designStart.wy)
+        if (dx < 8 && dy < 8) {
+          // Single click: point designation
+          this._onRightClick(p)
+        } else {
+          // Area drag designation
+          this._confirmDesignate(this._designStart, { wx: p.worldX, wy: p.worldY })
+        }
+        this._designating = false
+        this._designStart = null
+        this._designGfx.clear()
+      }
+
       if (isMobile && !this._didLongPress) {
         this._cancelLongPress()
         this._onLeftClick(p)
@@ -372,6 +399,43 @@ export class GameScene extends Phaser.Scene {
     if (keys.addKey('S').isDown || keys.addKey('DOWN').isDown)  cam.scrollY += speed * dt
     if (keys.addKey('A').isDown || keys.addKey('LEFT').isDown)  cam.scrollX -= speed * dt
     if (keys.addKey('D').isDown || keys.addKey('RIGHT').isDown) cam.scrollX += speed * dt
+  }
+
+  private _updateDesignBox(): void {
+    this._designGfx.clear()
+    if (!this._designating || !this._designStart) return
+
+    const mx = this.input.activePointer.worldX
+    const my = this.input.activePointer.worldY
+    const x  = Math.min(this._designStart.wx, mx)
+    const y  = Math.min(this._designStart.wy, my)
+    const w  = Math.abs(mx - this._designStart.wx)
+    const h  = Math.abs(my - this._designStart.wy)
+
+    this._designGfx.fillStyle(0xff8800, 0.12)
+    this._designGfx.fillRect(x, y, w, h)
+    this._designGfx.lineStyle(1, 0xff8800, 0.7)
+    this._designGfx.strokeRect(x, y, w, h)
+  }
+
+  private _confirmDesignate(from: { wx: number; wy: number }, to: { wx: number; wy: number }): void {
+    const x1 = Math.min(from.wx, to.wx)
+    const y1 = Math.min(from.wy, to.wy)
+    const x2 = Math.max(from.wx, to.wx)
+    const y2 = Math.max(from.wy, to.wy)
+
+    for (const eid of this._resourceEids) {
+      const rx = Position.x[eid]
+      const ry = Position.y[eid]
+      if (rx >= x1 && rx <= x2 && ry >= y1 && ry <= y2) {
+        if (Resource.designated[eid] === 0) {
+          Resource.designated[eid] = 1
+          const { tx, ty } = this.worldMap.worldToTile(rx, ry)
+          const kind = Resource.kind[eid] as ResourceTypeId
+          this.jobQueue.addJob(kind === ResourceTypeId.Tree ? JobTypeId.ChopTree : JobTypeId.MineRock, tx, ty, eid)
+        }
+      }
+    }
   }
 
   private _onRightClick(p: Phaser.Input.Pointer): void {

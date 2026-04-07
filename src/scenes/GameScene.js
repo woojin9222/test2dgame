@@ -31,6 +31,7 @@ export class GameScene extends Phaser.Scene {
     // ─── Phaser objects ──────────────────────────────────────────────────────────
     _tileGfx;
     _ghostGfx; // 건축 미리보기
+    _designGfx; // 지정 영역 선택
     // ─── Entity tracking ─────────────────────────────────────────────────────────
     _resourceEids = new Set();
     _colonistEids = [];
@@ -44,6 +45,9 @@ export class GameScene extends Phaser.Scene {
     activeBuildKind = -1;
     _dragStart = null;
     _dragging = false;
+    // ─── Designate drag ──────────────────────────────────────────────────────────
+    _designating = false;
+    _designStart = null;
     constructor() { super('Game'); }
     // ─── Lifecycle ────────────────────────────────────────────────────────────────
     create() {
@@ -55,6 +59,8 @@ export class GameScene extends Phaser.Scene {
         this._drawTiles();
         this._ghostGfx = this.add.graphics();
         this._ghostGfx.setDepth(10);
+        this._designGfx = this.add.graphics();
+        this._designGfx.setDepth(9);
         this._spawnResources();
         this._spawnColonists();
         const cx = (MAP_W * TILE_SIZE) / 2;
@@ -83,6 +89,7 @@ export class GameScene extends Phaser.Scene {
         renderColonists(world);
         // ── Build mode ghost preview ──────────────────────────────────────────────
         this._updateGhost();
+        this._updateDesignBox();
     }
     // ─── World rendering ─────────────────────────────────────────────────────────
     _drawTiles() {
@@ -230,7 +237,9 @@ export class GameScene extends Phaser.Scene {
                         this.exitBuildMode();
                         return;
                     }
-                    this._onRightClick(p);
+                    // 드래그 지정 시작
+                    this._designating = true;
+                    this._designStart = { wx: p.worldX, wy: p.worldY };
                 }
                 if (p.leftButtonDown()) {
                     if (this.activeBuildKind !== -1) {
@@ -290,6 +299,22 @@ export class GameScene extends Phaser.Scene {
                 this._dragStart = null;
                 this._dragging = false;
             }
+            // Designate drag confirm (right-click up)
+            if (this._designating && this._designStart) {
+                const dx = Math.abs(p.worldX - this._designStart.wx);
+                const dy = Math.abs(p.worldY - this._designStart.wy);
+                if (dx < 8 && dy < 8) {
+                    // Single click: point designation
+                    this._onRightClick(p);
+                }
+                else {
+                    // Area drag designation
+                    this._confirmDesignate(this._designStart, { wx: p.worldX, wy: p.worldY });
+                }
+                this._designating = false;
+                this._designStart = null;
+                this._designGfx.clear();
+            }
             if (isMobile && !this._didLongPress) {
                 this._cancelLongPress();
                 this._onLeftClick(p);
@@ -340,6 +365,39 @@ export class GameScene extends Phaser.Scene {
             cam.scrollX -= speed * dt;
         if (keys.addKey('D').isDown || keys.addKey('RIGHT').isDown)
             cam.scrollX += speed * dt;
+    }
+    _updateDesignBox() {
+        this._designGfx.clear();
+        if (!this._designating || !this._designStart)
+            return;
+        const mx = this.input.activePointer.worldX;
+        const my = this.input.activePointer.worldY;
+        const x = Math.min(this._designStart.wx, mx);
+        const y = Math.min(this._designStart.wy, my);
+        const w = Math.abs(mx - this._designStart.wx);
+        const h = Math.abs(my - this._designStart.wy);
+        this._designGfx.fillStyle(0xff8800, 0.12);
+        this._designGfx.fillRect(x, y, w, h);
+        this._designGfx.lineStyle(1, 0xff8800, 0.7);
+        this._designGfx.strokeRect(x, y, w, h);
+    }
+    _confirmDesignate(from, to) {
+        const x1 = Math.min(from.wx, to.wx);
+        const y1 = Math.min(from.wy, to.wy);
+        const x2 = Math.max(from.wx, to.wx);
+        const y2 = Math.max(from.wy, to.wy);
+        for (const eid of this._resourceEids) {
+            const rx = Position.x[eid];
+            const ry = Position.y[eid];
+            if (rx >= x1 && rx <= x2 && ry >= y1 && ry <= y2) {
+                if (Resource.designated[eid] === 0) {
+                    Resource.designated[eid] = 1;
+                    const { tx, ty } = this.worldMap.worldToTile(rx, ry);
+                    const kind = Resource.kind[eid];
+                    this.jobQueue.addJob(kind === 0 /* ResourceTypeId.Tree */ ? 0 /* JobTypeId.ChopTree */ : 1 /* JobTypeId.MineRock */, tx, ty, eid);
+                }
+            }
+        }
     }
     _onRightClick(p) {
         const wx = p.worldX, wy = p.worldY;

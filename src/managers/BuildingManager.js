@@ -10,8 +10,10 @@ import { MAP_W, MAP_H } from './WorldMap';
 /** tile index → building eid (0 = empty) */
 const NO_BUILDING = 0;
 export class BuildingManager {
-    /** Flat array [ty * MAP_W + tx] → eid or 0 */
+    /** Non-floor buildings [ty * MAP_W + tx] → eid or 0 */
     _tiles = new Int32Array(MAP_W * MAP_H);
+    /** Floor layer (separate so furniture can be placed on top) */
+    _floorTiles = new Int32Array(MAP_W * MAP_H);
     /** All building eids */
     buildingEids = new Set();
     /** Stockpile tile set (tx,ty) → true */
@@ -26,10 +28,12 @@ export class BuildingManager {
     }
     // ─── Queries ──────────────────────────────────────────────────────────────────
     getAt(tx, ty) {
-        return this._tiles[ty * MAP_W + tx] ?? NO_BUILDING;
+        const idx = ty * MAP_W + tx;
+        return this._tiles[idx] !== NO_BUILDING ? this._tiles[idx] : (this._floorTiles[idx] ?? NO_BUILDING);
     }
     isEmpty(tx, ty) {
-        return this.getAt(tx, ty) === NO_BUILDING;
+        const idx = ty * MAP_W + tx;
+        return this._tiles[idx] === NO_BUILDING && this._floorTiles[idx] === NO_BUILDING;
     }
     isStockpile(tx, ty) {
         return this.stockpileTiles.has(`${tx},${ty}`);
@@ -38,11 +42,25 @@ export class BuildingManager {
     canPlace(tx, ty, kind) {
         if (tx < 0 || tx >= MAP_W || ty < 0 || ty >= MAP_H)
             return false;
-        if (!this.isEmpty(tx, ty))
-            return false;
         if (!this._worldMap.isWalkable(tx, ty))
             return false;
-        return true;
+        const idx = ty * MAP_W + tx;
+        if (kind === 1 /* BuildingKind.Floor */) {
+            // Can only place floor if no building at all exists here
+            return this._floorTiles[idx] === NO_BUILDING && this._tiles[idx] === NO_BUILDING;
+        }
+        else {
+            // Furniture/walls: can be placed on top of a completed floor, but not if another non-floor building exists
+            if (this._tiles[idx] !== NO_BUILDING)
+                return false;
+            // If floor exists, it must be completed (not blueprint)
+            if (this._floorTiles[idx] !== NO_BUILDING) {
+                const floorEid = this._floorTiles[idx];
+                if (Building.isBuilt[floorEid] !== 1)
+                    return false; // floor still under construction
+            }
+            return true;
+        }
     }
     // ─── Placement ────────────────────────────────────────────────────────────────
     /**
@@ -54,18 +72,15 @@ export class BuildingManager {
             return -1;
         const def = BUILDING_DEFS[kind];
         const { wx, wy } = this._worldMap.tileToWorld(tx, ty);
-        // Check resources for instant builds
-        if (!def.instantBuild) {
-            if (this._gameTime.wood < def.costWood)
-                return -1;
-            if (this._gameTime.stone < def.costStone)
-                return -1;
-            this._gameTime.wood -= def.costWood;
-            this._gameTime.stone -= def.costStone;
-        }
+        const idx = ty * MAP_W + tx;
         const isInstant = def.instantBuild;
         const eid = spawnBuilding(wx, wy, kind, isInstant, def.hp);
-        this._tiles[ty * MAP_W + tx] = eid;
+        if (kind === 1 /* BuildingKind.Floor */) {
+            this._floorTiles[idx] = eid;
+        }
+        else {
+            this._tiles[idx] = eid;
+        }
         this.buildingEids.add(eid);
         if (kind === 3 /* BuildingKind.Stockpile */) {
             this.stockpileTiles.add(`${tx},${ty}`);
@@ -75,35 +90,45 @@ export class BuildingManager {
             this._worldMap.setBlocked(tx, ty, true);
             this._jobQueue.addJob(3 /* JobTypeId.Build */, tx, ty, eid);
         }
-        else {
-            // Stockpile은 walkable 유지
-        }
         return eid;
     }
     /** Called by BuildSystem when construction completes */
     finishBuilding(eid) {
-        Building.isBuilt[eid] = 1;
-        Building.buildProgress[eid] = 100;
         const kind = Building.kind[eid];
         const def = BUILDING_DEFS[kind];
-        if (!def.walkable) {
-            // 벽 등 → 경로탐색 계속 차단
+        // Deduct materials NOW (at construction completion, not blueprint placement)
+        if (!def.instantBuild) {
+            if (this._gameTime.wood < def.costWood)
+                return false;
+            if (this._gameTime.stone < def.costStone)
+                return false;
+            this._gameTime.wood -= def.costWood;
+            this._gameTime.stone -= def.costStone;
         }
-        else {
+        Building.isBuilt[eid] = 1;
+        Building.buildProgress[eid] = 100;
+        if (def.walkable) {
             // 바닥/문 → 통행 가능하게
             const { tx, ty } = this._worldMap.worldToTile(Position.x[eid], Position.y[eid]);
             this._worldMap.setBlocked(tx, ty, false);
         }
+        return true;
     }
     /** Remove a building (deconstruct or destroy) */
     remove(tx, ty) {
-        const eid = this.getAt(tx, ty);
+        const idx = ty * MAP_W + tx;
+        // Prefer removing non-floor building first; if none, remove floor
+        const eid = this._tiles[idx] !== NO_BUILDING ? this._tiles[idx] : this._floorTiles[idx];
         if (eid === NO_BUILDING)
             return;
-        this._tiles[ty * MAP_W + tx] = NO_BUILDING;
+        if (this._tiles[idx] === eid) {
+            this._tiles[idx] = NO_BUILDING;
+        }
+        else {
+            this._floorTiles[idx] = NO_BUILDING;
+        }
         this.buildingEids.delete(eid);
         this.stockpileTiles.delete(`${tx},${ty}`);
-        // Unblock tile
         this._worldMap.setBlocked(tx, ty, false);
         this._jobQueue.cancelByTarget(eid);
         const gfx = gfxMap.get(eid);

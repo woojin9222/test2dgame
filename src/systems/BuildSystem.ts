@@ -52,8 +52,15 @@ export function buildSystem(
     Building.buildProgress[targetEid] = Math.min(100, (job.workDone / job.workRequired) * 100)
 
     if (job.workDone >= job.workRequired) {
-      buildingMgr.finishBuilding(targetEid)
-      jobQueue.complete(job)
+      const ok = buildingMgr.finishBuilding(targetEid)
+      if (!ok) {
+        // 재료 부족 → 작업 취소, 설계도 유지
+        job.workDone = 0
+        Building.buildProgress[targetEid] = 0
+        jobQueue.returnJob(job)
+      } else {
+        jobQueue.complete(job)
+      }
       JobWorker.jobId[eid] = -1
       ColonistState.state[eid] = ColonistStateId.Idle
     }

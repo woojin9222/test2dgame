@@ -113,13 +113,6 @@ function _drawBuilding(gfx, kind, isBuilt, alpha, progress) {
                 gfx.lineStyle(1, 0x555566, 0.8);
                 gfx.strokeRect(-half, -half, TILE_SIZE, TILE_SIZE);
             }
-            else {
-                // 건설 중 진행 바
-                gfx.fillStyle(0x4488ff, 0.7);
-                gfx.fillRect(-half, half - 5, TILE_SIZE * progress, 4);
-                gfx.lineStyle(1, 0x4488ff, 0.5);
-                gfx.strokeRect(-half, -half, TILE_SIZE, TILE_SIZE);
-            }
             break;
         case 1 /* BuildingKind.Floor */:
             gfx.fillStyle(0xc8a060, alpha);
@@ -130,13 +123,11 @@ function _drawBuilding(gfx, kind, isBuilt, alpha, progress) {
             }
             break;
         case 2 /* BuildingKind.Door */:
-            // Frame
             gfx.fillStyle(0x8b5e2e, alpha);
             gfx.fillRect(-half, -half, 4, TILE_SIZE);
             gfx.fillRect(half - 4, -half, 4, TILE_SIZE);
             gfx.fillRect(-half, -half, TILE_SIZE, 4);
-            // Door panel
-            gfx.fillStyle(isBuilt ? 0xd4882a : 0xd4882a, alpha * 0.7);
+            gfx.fillStyle(0xd4882a, alpha * 0.7);
             gfx.fillRect(-half + 4, -half + 4, TILE_SIZE - 8, TILE_SIZE - 8);
             break;
         case 3 /* BuildingKind.Stockpile */:
@@ -153,6 +144,18 @@ function _drawBuilding(gfx, kind, isBuilt, alpha, progress) {
             gfx.lineStyle(1, 0x4a3010, alpha);
             gfx.strokeRect(-half + 2, -half + 2, TILE_SIZE - 4, TILE_SIZE - 4);
             break;
+    }
+    // 건설 중 → 파란 진행 바 (Stockpile 제외)
+    if (!isBuilt && kind !== 3 /* BuildingKind.Stockpile */) {
+        // 반투명 배경
+        gfx.fillStyle(0x000000, 0.4);
+        gfx.fillRect(-half, half - 6, TILE_SIZE, 5);
+        // 진행량
+        gfx.fillStyle(0x44aaff, 0.9);
+        gfx.fillRect(-half, half - 6, TILE_SIZE * progress, 5);
+        // 테두리
+        gfx.lineStyle(1, 0x4488ff, 0.6);
+        gfx.strokeRect(-half, -half, TILE_SIZE, TILE_SIZE);
     }
 }
 // ─── Dropped Items ────────────────────────────────────────────────────────────
