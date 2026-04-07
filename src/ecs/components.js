@@ -29,6 +29,21 @@ export const Resource = defineComponent({
     maxHealth: Types.i16,
     designated: Types.ui8, // 0 | 1
 });
+// ─── Buildings ────────────────────────────────────────────────────────────────
+export const Building = defineComponent({
+    kind: Types.ui8, // BuildingKind
+    isBuilt: Types.ui8, // 0=청사진, 1=완성
+    buildProgress: Types.f32, // 0–100
+    hp: Types.i16,
+    maxHp: Types.i16,
+});
+// ─── Dropped items (수확 후 맵에 떨어지는 아이템) ─────────────────────────────
+export const DroppedItem = defineComponent({
+    kind: Types.ui8, // ItemKind
+    amount: Types.i16,
+});
 // ─── Tag components (no data, used for queries) ───────────────────────────────
 export const IsColonist = defineComponent();
 export const IsResource = defineComponent();
+export const IsBuilding = defineComponent();
+export const IsDroppedItem = defineComponent();

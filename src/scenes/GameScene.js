@@ -1,83 +1,90 @@
 /**
  * GameScene — 메인 게임 씬
- *
- * 매 프레임:
- *   1. ECS systems 실행 (순수 로직, Phaser 무관)
- *   2. Render systems 실행 (ECS 데이터 → Phaser Graphics)
  */
 import Phaser from 'phaser';
 import { removeEntity } from 'bitecs';
-import { world, spawnColonist, spawnResource, gfxMap } from '../ecs/world';
+import { world, spawnColonist, spawnResource, spawnDroppedItem, gfxMap } from '../ecs/world';
 import { Resource, Position } from '../ecs/components';
 import { WorldMap, TILE_SIZE, MAP_W, MAP_H, TILE_COLORS } from '../managers/WorldMap';
 import { JobQueue } from '../managers/JobQueue';
 import { GameTime } from '../managers/GameTime';
+import { BuildingManager } from '../managers/BuildingManager';
 import { needsSystem, recoverySystem } from '../systems/NeedsSystem';
 import { movementSystem } from '../systems/MovementSystem';
 import { aiSystem } from '../systems/AISystem';
 import { jobSystem } from '../systems/JobSystem';
-import { renderColonists, renderResources } from '../systems/RenderSystem';
-// ─── Scene constants ──────────────────────────────────────────────────────────
+import { buildSystem } from '../systems/BuildSystem';
+import { haulSystem } from '../systems/HaulSystem';
+import { renderColonists, renderResources, renderBuildings, renderDroppedItems } from '../systems/RenderSystem';
+// ─── Constants ────────────────────────────────────────────────────────────────
 const NUM_TREES = 200;
 const NUM_ROCKS = 100;
 const NUM_COLONISTS = 3;
 const COLONIST_NAMES = ['Alice', 'Bob', 'Charlie', 'Diana', 'Eve', 'Frank'];
 const COLONIST_COLORS = [0x00eeff, 0xffee00, 0xff88ff, 0xff8800, 0x88ff44, 0xff4444];
 export class GameScene extends Phaser.Scene {
-    // Managers (Bevy Resources)
+    // ─── Managers ────────────────────────────────────────────────────────────────
     worldMap;
     jobQueue;
     gameTime;
-    // Phaser render layer for tiles
+    buildingMgr;
+    // ─── Phaser objects ──────────────────────────────────────────────────────────
     _tileGfx;
-    // Resource entity ids
+    _ghostGfx; // 건축 미리보기
+    // ─── Entity tracking ─────────────────────────────────────────────────────────
     _resourceEids = new Set();
-    // Colonist entity ids
     _colonistEids = [];
-    // Camera pan state
+    _droppedEids = new Set();
+    // ─── Camera ──────────────────────────────────────────────────────────────────
     _panning = false;
     _panStart = new Phaser.Math.Vector2();
     _camStart = new Phaser.Math.Vector2();
+    // ─── Build mode ──────────────────────────────────────────────────────────────
+    /** Currently selected building kind, or -1 = no build mode */
+    activeBuildKind = -1;
+    _dragStart = null;
+    _dragging = false;
     constructor() { super('Game'); }
+    // ─── Lifecycle ────────────────────────────────────────────────────────────────
     create() {
-        // Init managers
         this.worldMap = new WorldMap();
         this.jobQueue = new JobQueue();
         this.gameTime = new GameTime();
-        // Draw static tile layer
+        this.buildingMgr = new BuildingManager(this.worldMap, this.jobQueue, this.gameTime);
         this._tileGfx = this.add.graphics();
         this._drawTiles();
-        // Spawn resource nodes
+        this._ghostGfx = this.add.graphics();
+        this._ghostGfx.setDepth(10);
         this._spawnResources();
-        // Spawn colonists
         this._spawnColonists();
-        // Camera setup
         const cx = (MAP_W * TILE_SIZE) / 2;
         const cy = (MAP_H * TILE_SIZE) / 2;
         this.cameras.main.setZoom(1.6);
         this.cameras.main.centerOn(cx, cy);
         this.cameras.main.setBounds(0, 0, MAP_W * TILE_SIZE, MAP_H * TILE_SIZE);
-        // Input
         this._setupInput();
-        // Launch UI scene on top
         this.scene.launch('UI', { gameScene: this });
     }
     update(_time, delta) {
-        const dt = delta / 1000; // ms → seconds
+        const dt = delta / 1000;
         this.gameTime.tick(dt);
-        // ── ECS Systems (logic, no rendering) ────────────────────────────────────
+        // ── ECS Logic Systems ─────────────────────────────────────────────────────
         needsSystem(world, this.gameTime, dt);
         recoverySystem(world, this.gameTime, dt);
         aiSystem(world, this.gameTime, dt, this.jobQueue, this.worldMap);
         movementSystem(world, this.gameTime, dt, this.jobQueue);
-        jobSystem(world, this.gameTime, dt, this.jobQueue, this.worldMap, (eid) => {
-            this._onResourceDied(eid);
-        });
+        jobSystem(world, this.gameTime, dt, this.jobQueue, this.worldMap, (eid, itemKind, amount) => this._onResourceDied(eid, itemKind, amount));
+        buildSystem(world, this.gameTime, dt, this.jobQueue, this.buildingMgr);
+        haulSystem(world, this.gameTime, dt, this.jobQueue, this.buildingMgr, this.worldMap, (kind, amount) => this._onItemDelivered(kind, amount));
         // ── Render Systems ────────────────────────────────────────────────────────
+        renderBuildings(world);
+        renderDroppedItems(world);
         renderResources(world);
         renderColonists(world);
+        // ── Build mode ghost preview ──────────────────────────────────────────────
+        this._updateGhost();
     }
-    // ─── World drawing ────────────────────────────────────────────────────────────
+    // ─── World rendering ─────────────────────────────────────────────────────────
     _drawTiles() {
         const g = this._tileGfx;
         for (let ty = 0; ty < MAP_H; ty++) {
@@ -85,7 +92,6 @@ export class GameScene extends Phaser.Scene {
                 const tile = this.worldMap.getTile(tx, ty);
                 g.fillStyle(TILE_COLORS[tile], 1);
                 g.fillRect(tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-                // Grid lines
                 g.lineStyle(1, 0x000000, 0.07);
                 g.strokeRect(tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, TILE_SIZE);
             }
@@ -114,10 +120,8 @@ export class GameScene extends Phaser.Scene {
     _makeResource(tx, ty, kind) {
         const { wx, wy } = this.worldMap.tileToWorld(tx, ty);
         const eid = spawnResource(wx, wy, kind);
-        const gfx = this.add.graphics();
-        gfxMap.set(eid, gfx);
+        gfxMap.set(eid, this.add.graphics());
         this._resourceEids.add(eid);
-        // Block pathfinding tile
         this.worldMap.setBlocked(tx, ty, true);
     }
     _spawnColonists() {
@@ -131,28 +135,135 @@ export class GameScene extends Phaser.Scene {
                 ty = cy;
             }
             const { wx, wy } = this.worldMap.tileToWorld(tx, ty);
-            const name = COLONIST_NAMES[i % COLONIST_NAMES.length];
-            const color = COLONIST_COLORS[i % COLONIST_COLORS.length];
-            const eid = spawnColonist(wx, wy, name, color);
-            const gfx = this.add.graphics();
-            gfxMap.set(eid, gfx);
+            const eid = spawnColonist(wx, wy, COLONIST_NAMES[i % COLONIST_NAMES.length], COLONIST_COLORS[i % COLONIST_COLORS.length]);
+            gfxMap.set(eid, this.add.graphics());
             this._colonistEids.push(eid);
         }
     }
+    // ─── Build mode ──────────────────────────────────────────────────────────────
+    enterBuildMode(kind) {
+        this.activeBuildKind = kind;
+        this.events.emit('build-mode-changed', kind);
+    }
+    exitBuildMode() {
+        this.activeBuildKind = -1;
+        this._dragStart = null;
+        this._dragging = false;
+        this._ghostGfx.clear();
+        this.events.emit('build-mode-changed', -1);
+    }
+    _getDragTiles(from, to) {
+        const tiles = [];
+        const dx = Math.sign(to.tx - from.tx);
+        const dy = Math.sign(to.ty - from.ty);
+        if (Math.abs(to.tx - from.tx) >= Math.abs(to.ty - from.ty)) {
+            // Horizontal drag
+            let tx = from.tx;
+            while (tx !== to.tx + dx) {
+                tiles.push({ tx, ty: from.ty });
+                tx += dx || 1;
+            }
+        }
+        else {
+            // Vertical drag
+            let ty = from.ty;
+            while (ty !== to.ty + dy) {
+                tiles.push({ tx: from.tx, ty });
+                ty += dy || 1;
+            }
+        }
+        if (tiles.length === 0)
+            tiles.push(from);
+        return tiles;
+    }
+    _updateGhost() {
+        if (this.activeBuildKind === -1)
+            return;
+        this._ghostGfx.clear();
+        const mouse = this.input.activePointer;
+        const worldX = mouse.worldX;
+        const worldY = mouse.worldY;
+        const { tx: curTx, ty: curTy } = this.worldMap.worldToTile(worldX, worldY);
+        const from = this._dragStart ?? { tx: curTx, ty: curTy };
+        const tiles = this._getDragTiles(from, { tx: curTx, ty: curTy });
+        const kind = this.activeBuildKind;
+        for (const { tx, ty } of tiles) {
+            const canPlace = this.buildingMgr.canPlace(tx, ty, kind);
+            const color = canPlace ? 0x44ff88 : 0xff4444;
+            const alpha = 0.45;
+            this._ghostGfx.fillStyle(color, alpha);
+            this._ghostGfx.fillRect(tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+            this._ghostGfx.lineStyle(2, color, 0.8);
+            this._ghostGfx.strokeRect(tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+        }
+    }
+    _confirmBuild(from, to) {
+        const kind = this.activeBuildKind;
+        const tiles = this._getDragTiles(from, to);
+        for (const { tx, ty } of tiles) {
+            const eid = this.buildingMgr.place(tx, ty, kind);
+            if (eid !== -1) {
+                gfxMap.set(eid, this.add.graphics());
+                this.buildingMgr.buildingEids.add(eid);
+            }
+        }
+    }
     // ─── Input ────────────────────────────────────────────────────────────────────
+    _longPressTimer = null;
+    _longPressPointer = null;
+    _didLongPress = false;
+    _touchPanActive = false;
+    _touchPanStart = new Phaser.Math.Vector2();
+    _touchCamStart = new Phaser.Math.Vector2();
     _setupInput() {
         const cam = this.cameras.main;
-        // Middle mouse pan
+        const isMobile = !this.sys.game.device.os.desktop;
         this.input.on('pointerdown', (p) => {
-            if (p.middleButtonDown()) {
-                this._panning = true;
-                this._panStart.set(p.x, p.y);
-                this._camStart.set(cam.scrollX, cam.scrollY);
+            if (!isMobile) {
+                if (p.middleButtonDown()) {
+                    this._panning = true;
+                    this._panStart.set(p.x, p.y);
+                    this._camStart.set(cam.scrollX, cam.scrollY);
+                }
+                if (p.rightButtonDown()) {
+                    if (this.activeBuildKind !== -1) {
+                        this.exitBuildMode();
+                        return;
+                    }
+                    this._onRightClick(p);
+                }
+                if (p.leftButtonDown()) {
+                    if (this.activeBuildKind !== -1) {
+                        const { tx, ty } = this.worldMap.worldToTile(p.worldX, p.worldY);
+                        this._dragStart = { tx, ty };
+                        this._dragging = true;
+                    }
+                    else {
+                        this._onLeftClick(p);
+                    }
+                }
+                return;
             }
-            if (p.rightButtonDown())
-                this._onRightClick(p);
-            if (p.leftButtonDown())
-                this._onLeftClick(p);
+            // Mobile
+            this._didLongPress = false;
+            if (this.input.pointer1.isDown && this.input.pointer2.isDown) {
+                this._touchPanActive = true;
+                this._touchPanStart.set(p.x, p.y);
+                this._touchCamStart.set(cam.scrollX, cam.scrollY);
+                this._cancelLongPress();
+                return;
+            }
+            this._longPressPointer = p;
+            this._longPressTimer = this.time.addEvent({
+                delay: 600,
+                callback: () => {
+                    this._didLongPress = true;
+                    if (this._longPressPointer)
+                        this._onRightClick(this._longPressPointer);
+                    if (navigator.vibrate)
+                        navigator.vibrate(40);
+                },
+            });
         });
         this.input.on('pointermove', (p) => {
             if (this._panning) {
@@ -160,20 +271,60 @@ export class GameScene extends Phaser.Scene {
                 const dy = (p.y - this._panStart.y) / cam.zoom;
                 cam.setScroll(this._camStart.x - dx, this._camStart.y - dy);
             }
+            if (isMobile && p.isDown && !this._touchPanActive) {
+                const dx = (p.x - (this._longPressPointer?.x ?? p.x)) / cam.zoom;
+                const dy = (p.y - (this._longPressPointer?.y ?? p.y)) / cam.zoom;
+                if (Math.abs(dx) + Math.abs(dy) > 10)
+                    this._cancelLongPress();
+                cam.setScroll(this._touchCamStart.x - dx, this._touchCamStart.y - dy);
+            }
         });
         this.input.on('pointerup', (p) => {
             if (!p.middleButtonDown())
                 this._panning = false;
+            this._touchPanActive = false;
+            // Build drag confirm
+            if (this._dragging && this._dragStart) {
+                const { tx, ty } = this.worldMap.worldToTile(p.worldX, p.worldY);
+                this._confirmBuild(this._dragStart, { tx, ty });
+                this._dragStart = null;
+                this._dragging = false;
+            }
+            if (isMobile && !this._didLongPress) {
+                this._cancelLongPress();
+                this._onLeftClick(p);
+            }
         });
-        // Scroll zoom
+        // Pinch zoom (mobile)
+        if (isMobile) {
+            let _lastDist = 0;
+            this.input.on('pointermove', () => {
+                if (this.input.pointer1.isDown && this.input.pointer2.isDown) {
+                    const dx = this.input.pointer1.x - this.input.pointer2.x;
+                    const dy = this.input.pointer1.y - this.input.pointer2.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (_lastDist > 0)
+                        cam.setZoom(Phaser.Math.Clamp(cam.zoom * (dist / _lastDist), 0.3, 4));
+                    _lastDist = dist;
+                }
+                else {
+                    _lastDist = 0;
+                }
+            });
+        }
         this.input.on('wheel', (_p, _gos, _dx, dy) => {
-            const z = Phaser.Math.Clamp(cam.zoom * (dy > 0 ? 0.9 : 1.1), 0.3, 4);
-            cam.setZoom(z);
+            cam.setZoom(Phaser.Math.Clamp(cam.zoom * (dy > 0 ? 0.9 : 1.1), 0.3, 4));
         });
-        // WASD camera movement in update
-        this.events.on('update', (_t, delta) => {
-            this._cameraKeys(delta / 1000);
-        });
+        // R key: ESC exits build mode
+        this.input.keyboard?.addKey('ESC').on('down', () => this.exitBuildMode());
+        this.events.on('update', (_t, delta) => this._cameraKeys(delta / 1000));
+    }
+    _cancelLongPress() {
+        if (this._longPressTimer) {
+            this._longPressTimer.remove();
+            this._longPressTimer = null;
+        }
+        this._longPressPointer = null;
     }
     _cameraKeys(dt) {
         const keys = this.input.keyboard;
@@ -191,15 +342,19 @@ export class GameScene extends Phaser.Scene {
             cam.scrollX += speed * dt;
     }
     _onRightClick(p) {
-        const wx = p.worldX;
-        const wy = p.worldY;
-        // Find nearest resource node within click radius
-        let bestDist = 22;
-        let bestEid = -1;
+        const wx = p.worldX, wy = p.worldY;
+        // 건물 철거 (건축 모드 아닐 때)
+        if (this.activeBuildKind === -1) {
+            const { tx, ty } = this.worldMap.worldToTile(wx, wy);
+            if (!this.buildingMgr.isEmpty(tx, ty)) {
+                this.buildingMgr.remove(tx, ty);
+                return;
+            }
+        }
+        // 자원 지정
+        let bestDist = 22, bestEid = -1;
         for (const eid of this._resourceEids) {
-            const dx = Position.x[eid] - wx;
-            const dy = Position.y[eid] - wy;
-            const d = Math.sqrt(dx * dx + dy * dy);
+            const d = Math.hypot(Position.x[eid] - wx, Position.y[eid] - wy);
             if (d < bestDist) {
                 bestDist = d;
                 bestEid = eid;
@@ -207,31 +362,26 @@ export class GameScene extends Phaser.Scene {
         }
         if (bestEid === -1)
             return;
-        const isDesignated = Resource.designated[bestEid] === 1;
-        if (isDesignated) {
-            // Cancel
+        if (Resource.designated[bestEid] === 1) {
             Resource.designated[bestEid] = 0;
             this.jobQueue.cancelByTarget(bestEid);
         }
         else {
-            // Designate
             Resource.designated[bestEid] = 1;
             const { tx, ty } = this.worldMap.worldToTile(Position.x[bestEid], Position.y[bestEid]);
             const kind = Resource.kind[bestEid];
-            const jobType = kind === 0 /* ResourceTypeId.Tree */ ? 0 /* JobTypeId.ChopTree */ : 1 /* JobTypeId.MineRock */;
-            this.jobQueue.addJob(jobType, tx, ty, bestEid);
+            this.jobQueue.addJob(kind === 0 /* ResourceTypeId.Tree */ ? 0 /* JobTypeId.ChopTree */ : 1 /* JobTypeId.MineRock */, tx, ty, bestEid);
         }
     }
-    _onLeftClick(_p) {
-        // Selection logic handled in UIScene via event
-        const wx = _p.worldX;
-        const wy = _p.worldY;
-        let bestDist = 15;
-        let bestEid = -1;
+    _onLeftClick(p) {
+        const wx = p.worldX, wy = p.worldY;
+        if (window.__designateMode) {
+            this._onRightClick(p);
+            return;
+        }
+        let bestDist = 15, bestEid = -1;
         for (const eid of this._colonistEids) {
-            const dx = Position.x[eid] - wx;
-            const dy = Position.y[eid] - wy;
-            const d = Math.sqrt(dx * dx + dy * dy);
+            const d = Math.hypot(Position.x[eid] - wx, Position.y[eid] - wy);
             if (d < bestDist) {
                 bestDist = d;
                 bestEid = eid;
@@ -239,7 +389,8 @@ export class GameScene extends Phaser.Scene {
         }
         this.events.emit('colonist-selected', bestEid);
     }
-    _onResourceDied(eid) {
+    // ─── Callbacks ────────────────────────────────────────────────────────────────
+    _onResourceDied(eid, itemKind, amount) {
         const gfx = gfxMap.get(eid);
         if (gfx) {
             gfx.destroy();
@@ -247,7 +398,34 @@ export class GameScene extends Phaser.Scene {
         }
         this._resourceEids.delete(eid);
         removeEntity(world, eid);
+        // 창고가 있으면 DroppedItem 스폰, 없으면 바로 집계
+        if (this.buildingMgr.stockpileTiles.size > 0) {
+            const wx = Position.x[eid] || 0;
+            const wy = Position.y[eid] || 0;
+            this._spawnDroppedItem(wx || (MAP_W / 2 * TILE_SIZE), wy || (MAP_H / 2 * TILE_SIZE), itemKind, amount);
+        }
+        else {
+            this._onItemDelivered(itemKind, amount);
+        }
     }
-    // ─── Public getters (for UIScene) ────────────────────────────────────────────
+    _spawnDroppedItem(wx, wy, kind, amount) {
+        const eid = spawnDroppedItem(wx, wy, kind, amount);
+        gfxMap.set(eid, this.add.graphics());
+        this._droppedEids.add(eid);
+    }
+    _onItemDelivered(kind, amount) {
+        switch (kind) {
+            case 0 /* ItemKind.Wood */:
+                this.gameTime.addResource('wood', amount);
+                break;
+            case 1 /* ItemKind.Stone */:
+                this.gameTime.addResource('stone', amount);
+                break;
+            case 2 /* ItemKind.Food */:
+                this.gameTime.addResource('food', amount);
+                break;
+        }
+    }
+    // ─── Public getters ───────────────────────────────────────────────────────────
     get colonistEids() { return this._colonistEids; }
 }

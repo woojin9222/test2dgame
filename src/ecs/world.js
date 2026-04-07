@@ -2,7 +2,7 @@
  * ECS World — entity factories and global ECS state
  */
 import { createWorld, addEntity, addComponent } from 'bitecs';
-import { Position, Hunger, Energy, Mood, ColonistState, JobWorker, IdleTimer, Resource, IsColonist, IsResource, } from './components';
+import { Position, Hunger, Energy, Mood, ColonistState, JobWorker, IdleTimer, Resource, IsColonist, IsResource, Building, IsBuilding, DroppedItem, IsDroppedItem, } from './components';
 export const world = createWorld();
 // ─── Non-ECS side-data (Phaser can't live in TypedArrays) ────────────────────
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -51,5 +51,30 @@ export function spawnResource(wx, wy, kind) {
     Resource.health[eid] = hp;
     Resource.maxHealth[eid] = hp;
     Resource.designated[eid] = 0;
+    return eid;
+}
+export function spawnBuilding(wx, wy, kind, isBuilt, maxHp) {
+    const eid = addEntity(world);
+    addComponent(world, Position, eid);
+    addComponent(world, Building, eid);
+    addComponent(world, IsBuilding, eid);
+    Position.x[eid] = wx;
+    Position.y[eid] = wy;
+    Building.kind[eid] = kind;
+    Building.isBuilt[eid] = isBuilt ? 1 : 0;
+    Building.buildProgress[eid] = isBuilt ? 100 : 0;
+    Building.hp[eid] = maxHp;
+    Building.maxHp[eid] = maxHp;
+    return eid;
+}
+export function spawnDroppedItem(wx, wy, kind, amount) {
+    const eid = addEntity(world);
+    addComponent(world, Position, eid);
+    addComponent(world, DroppedItem, eid);
+    addComponent(world, IsDroppedItem, eid);
+    Position.x[eid] = wx;
+    Position.y[eid] = wy;
+    DroppedItem.kind[eid] = kind;
+    DroppedItem.amount[eid] = amount;
     return eid;
 }

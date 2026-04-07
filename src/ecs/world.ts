@@ -6,8 +6,10 @@ import {
   Position, Hunger, Energy, Mood,
   ColonistState, JobWorker, IdleTimer,
   Resource, IsColonist, IsResource,
+  Building, IsBuilding,
+  DroppedItem, IsDroppedItem,
 } from './components'
-import { ColonistStateId, ResourceTypeId } from '../types'
+import { ColonistStateId, ResourceTypeId, BuildingKind, ItemKind } from '../types'
 
 export const world: IWorld = createWorld()
 
@@ -81,6 +83,48 @@ export function spawnResource(
   Resource.health[eid]      = hp
   Resource.maxHealth[eid]   = hp
   Resource.designated[eid]  = 0
+
+  return eid
+}
+
+export function spawnBuilding(
+  wx: number,
+  wy: number,
+  kind: BuildingKind,
+  isBuilt: boolean,
+  maxHp: number,
+): number {
+  const eid = addEntity(world)
+  addComponent(world, Position,   eid)
+  addComponent(world, Building,   eid)
+  addComponent(world, IsBuilding, eid)
+
+  Position.x[eid]             = wx
+  Position.y[eid]             = wy
+  Building.kind[eid]          = kind
+  Building.isBuilt[eid]       = isBuilt ? 1 : 0
+  Building.buildProgress[eid] = isBuilt ? 100 : 0
+  Building.hp[eid]            = maxHp
+  Building.maxHp[eid]         = maxHp
+
+  return eid
+}
+
+export function spawnDroppedItem(
+  wx: number,
+  wy: number,
+  kind: ItemKind,
+  amount: number,
+): number {
+  const eid = addEntity(world)
+  addComponent(world, Position,      eid)
+  addComponent(world, DroppedItem,   eid)
+  addComponent(world, IsDroppedItem, eid)
+
+  Position.x[eid]         = wx
+  Position.y[eid]         = wy
+  DroppedItem.kind[eid]   = kind
+  DroppedItem.amount[eid] = amount
 
   return eid
 }

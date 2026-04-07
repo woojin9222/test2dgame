@@ -4,7 +4,7 @@
 import Phaser from 'phaser'
 import { Hunger, Energy, Mood, ColonistState, JobWorker } from '../ecs/components'
 import { nameMap, colorMap } from '../ecs/world'
-import { ColonistStateId, STATE_NAMES, JOB_NAMES, JobTypeId } from '../types'
+import { ColonistStateId, STATE_NAMES, JOB_NAMES, JobTypeId, BuildingKind, BUILDING_DEFS } from '../types'
 import type { GameScene } from './GameScene'
 
 const DARK  = 'rgba(12,12,22,0.88)'
@@ -22,9 +22,11 @@ export class UIScene extends Phaser.Scene {
   private _leftPanel!: Phaser.GameObjects.DOMElement
   private _infoPanel!: Phaser.GameObjects.DOMElement
   private _tooltip!: Phaser.GameObjects.DOMElement
+  private _buildMenu!: Phaser.GameObjects.DOMElement
 
   private _selectedEid = -1
   private _tooltipTimer = 0
+  private _activeBuildKind = -1
 
   constructor() { super('UI') }
 
@@ -37,12 +39,18 @@ export class UIScene extends Phaser.Scene {
     this._createTopBar()
     this._createLeftPanel()
     this._createInfoPanel()
+    this._createBuildMenu()
     this._createTooltip()
 
     // Listen to game events
     this._game.events.on('colonist-selected', (eid: number) => {
       this._selectedEid = eid
       this._infoPanel.setVisible(eid !== -1)
+    })
+
+    this._game.events.on('build-mode-changed', (kind: number) => {
+      this._activeBuildKind = kind
+      this._updateBuildMenuHighlight()
     })
   }
 
@@ -123,9 +131,15 @@ export class UIScene extends Phaser.Scene {
             padding:3px 8px;cursor:pointer;border-radius:3px;font-size:12px">${t}</button>`
         ).join('')}
       </span>
-      <span style="font-size:10px;color:${DIM}">RMB: designate | MMB: pan | Scroll: zoom | WASD: camera</span>
+      <span id="hint-text" style="font-size:10px;color:${DIM}">RMB: 지정 | MMB: 이동 | 휠: 줌 | WASD: 카메라</span>
     </div>`
     this._topBar = this.add.dom(0, 0).createFromHTML(html).setOrigin(0, 0)
+
+    // 모바일이면 힌트 텍스트 변경
+    if (!this.sys.game.device.os.desktop) {
+      const hint = this._topBar.node.querySelector('#hint-text') as HTMLElement
+      if (hint) hint.textContent = '탭: 선택 | 길게누름: 지정 | 두손가락: 이동/줌'
+    }
   }
 
   private _createLeftPanel(): void {
@@ -172,6 +186,104 @@ export class UIScene extends Phaser.Scene {
     this._infoPanel = this.add.dom(190, 630).createFromHTML(html).setOrigin(0, 1).setVisible(false)
   }
 
+  private _createBuildMenu(): void {
+    const categories = [
+      {
+        label: '구조물',
+        items: [BuildingKind.Wall, BuildingKind.Floor, BuildingKind.Door],
+      },
+      {
+        label: '보관',
+        items: [BuildingKind.Stockpile, BuildingKind.Container],
+      },
+    ]
+
+    const btnBase = `
+      display:inline-flex;align-items:center;justify-content:center;
+      flex-direction:column;gap:2px;
+      min-width:64px;height:52px;
+      padding:4px 8px;
+      background:#1a1a30;border:1px solid #445;
+      color:#cce;font-family:monospace;font-size:11px;
+      cursor:pointer;border-radius:4px;
+      touch-action:manipulation;-webkit-tap-highlight-color:transparent;
+    `
+
+    const categoryHtml = categories.map(cat => {
+      const btns = cat.items.map(kind => {
+        const def = BUILDING_DEFS[kind]
+        const costParts: string[] = []
+        if (def.costWood  > 0) costParts.push(`🪵${def.costWood}`)
+        if (def.costStone > 0) costParts.push(`🪨${def.costStone}`)
+        const costStr = costParts.length ? costParts.join(' ') : '무료'
+        return `<button id="build-btn-${kind}" data-kind="${kind}"
+          style="${btnBase}"
+          title="${def.label} (${costStr})"
+          onclick="window.__enterBuildMode(${kind})">
+          <span style="font-size:16px">${def.emoji}</span>
+          <span>${def.label}</span>
+          <span style="font-size:9px;color:#888">${costStr}</span>
+        </button>`
+      }).join('')
+      return `<div style="display:flex;flex-direction:column;gap:2px;">
+        <div style="font-size:9px;color:${DIM};padding:0 2px">${cat.label}</div>
+        <div style="display:flex;gap:4px;">${btns}</div>
+      </div>`
+    }).join(`<div style="width:1px;background:#334;margin:0 6px;"></div>`)
+
+    const html = `
+    <div id="build-menu" style="
+      display:flex;align-items:flex-end;gap:0;
+      background:${DARK};
+      border-top:2px solid #333355;
+      border-radius:6px 6px 0 0;
+      padding:8px 12px 10px;
+      font-family:monospace;">
+      ${categoryHtml}
+      <div style="width:1px;background:#334;margin:0 8px;height:40px;align-self:center;"></div>
+      <button id="build-cancel-btn"
+        style="${btnBase}background:#2a1020;border-color:#664;color:#faa;"
+        onclick="window.__exitBuildMode()" title="건축 취소 (ESC)">
+        <span style="font-size:16px">✖</span>
+        <span>취소</span>
+      </button>
+    </div>`
+
+    // Position at bottom center
+    const screenW = this.scale.width
+    this._buildMenu = this.add.dom(screenW / 2, this.scale.height)
+      .createFromHTML(html).setOrigin(0.5, 1)
+
+    ;(window as any).__enterBuildMode = (kind: number) => {
+      this._game.enterBuildMode(kind as BuildingKind)
+    }
+    ;(window as any).__exitBuildMode = () => {
+      this._game.exitBuildMode()
+    }
+  }
+
+  private _updateBuildMenuHighlight(): void {
+    if (!this._buildMenu) return
+    const menuEl = this._buildMenu.node as HTMLElement
+    menuEl.querySelectorAll<HTMLElement>('[data-kind]').forEach(btn => {
+      const k = parseInt(btn.getAttribute('data-kind') ?? '-1', 10)
+      if (k === this._activeBuildKind) {
+        btn.style.background = '#1a3a1a'
+        btn.style.borderColor = '#44ff88'
+        btn.style.color = '#aaffcc'
+      } else {
+        btn.style.background = '#1a1a30'
+        btn.style.borderColor = '#445'
+        btn.style.color = '#cce'
+      }
+    })
+    const cancelBtn = menuEl.querySelector<HTMLElement>('#build-cancel-btn')
+    if (cancelBtn) {
+      cancelBtn.style.background = this._activeBuildKind !== -1 ? '#3a1020' : '#2a1020'
+      cancelBtn.style.borderColor = this._activeBuildKind !== -1 ? '#ff6644' : '#664'
+    }
+  }
+
   private _createTooltip(): void {
     const html = `<div id="tooltip" style="
       background:rgba(20,20,40,0.9);border:1px solid ${GOLD};
@@ -180,11 +292,61 @@ export class UIScene extends Phaser.Scene {
     this._tooltip = this.add.dom(640, 60).createFromHTML(html).setOrigin(0.5, 0).setVisible(false)
 
     // Expose global helpers (used by inline onclick in HTML)
-    ;(window as any).__setSpeed     = (i: number) => this._game.gameTime.setSpeed(i as 0|1|2|3)
+    ;(window as any).__setSpeed = (i: number) => this._game.gameTime.setSpeed(i as 0|1|2|3)
     ;(window as any).__selectColonist = (eid: number) => {
       this._selectedEid = eid
       this._infoPanel.setVisible(true)
     }
+
+    // 모바일 전용 하단 버튼
+    if (!this.sys.game.device.os.desktop) {
+      this._createMobileButtons()
+    }
+  }
+
+  private _createMobileButtons(): void {
+    const btnStyle = `
+      background:rgba(20,20,50,0.9);
+      border:2px solid #446;
+      color:#cce;
+      font-size:22px;
+      width:56px;height:56px;
+      border-radius:12px;
+      cursor:pointer;
+      display:flex;align-items:center;justify-content:center;
+      touch-action:manipulation;
+      -webkit-tap-highlight-color:transparent;
+    `
+    const html = `
+    <div style="display:flex;gap:10px;">
+      <button id="btn-designate" style="${btnStyle}" title="지정 (길게누름과 동일)">🪓</button>
+      <button id="btn-cancel"    style="${btnStyle}" title="지정 취소">✖</button>
+      <button id="btn-speed"     style="${btnStyle}" title="속도">▶</button>
+    </div>`
+
+    const bar = this.add.dom(10, 710).createFromHTML(html).setOrigin(0, 1)
+
+    let _designateMode = false
+    bar.node.querySelector('#btn-designate')!.addEventListener('click', () => {
+      _designateMode = !_designateMode
+      const btn = bar.node.querySelector('#btn-designate') as HTMLElement
+      btn.style.borderColor = _designateMode ? '#ff0' : '#446'
+      ;(window as any).__designateMode = _designateMode
+    })
+    bar.node.querySelector('#btn-cancel')!.addEventListener('click', () => {
+      _designateMode = false
+      const btn = bar.node.querySelector('#btn-designate') as HTMLElement
+      btn.style.borderColor = '#446'
+      ;(window as any).__designateMode = false
+    })
+
+    let _speedIdx = 1
+    bar.node.querySelector('#btn-speed')!.addEventListener('click', () => {
+      _speedIdx = (_speedIdx + 1) % 4
+      this._game.gameTime.setSpeed(_speedIdx as 0|1|2|3)
+      const labels = ['⏸','▶','▶▶','▶▶▶']
+      ;(bar.node.querySelector('#btn-speed') as HTMLElement).textContent = labels[_speedIdx]
+    })
   }
 
   showTooltip(msg: string, duration = 2): void {

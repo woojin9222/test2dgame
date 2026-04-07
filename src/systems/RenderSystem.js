@@ -3,10 +3,13 @@
  * Bevy: fn render_system(query: Query<(&Position, &ColonistState, &Hunger, &Energy)>)
  */
 import { defineQuery } from 'bitecs';
-import { Position, ColonistState, Hunger, Energy, Resource, IsColonist, IsResource, } from '../ecs/components';
+import { Position, ColonistState, Hunger, Energy, Resource, Building, DroppedItem, IsColonist, IsResource, IsBuilding, IsDroppedItem, } from '../ecs/components';
 import { gfxMap, colorMap } from '../ecs/world';
+import { TILE_SIZE } from '../managers/WorldMap';
 const colonistQ = defineQuery([IsColonist, Position, ColonistState, Hunger, Energy]);
 const resourceQ = defineQuery([IsResource, Position, Resource]);
+const buildingQ = defineQuery([IsBuilding, Position, Building]);
+const droppedQ = defineQuery([IsDroppedItem, Position, DroppedItem]);
 // State indicator colors (hex)
 const STATE_COLORS = {
     [0 /* ColonistStateId.Idle */]: 0xffffff,
@@ -78,6 +81,111 @@ export function renderResources(ecsWorld) {
         // Health bar (only if damaged)
         if (health < maxHealth) {
             _bar(gfx, -12, 14, 24, 3, health / maxHealth, health / maxHealth > 0.5 ? 0x33cc33 : 0xff4444);
+        }
+    }
+}
+// ─── Buildings ────────────────────────────────────────────────────────────────
+export function renderBuildings(ecsWorld) {
+    const eids = buildingQ(ecsWorld);
+    for (const eid of eids) {
+        const gfx = gfxMap.get(eid);
+        if (!gfx)
+            continue;
+        gfx.clear();
+        gfx.x = Position.x[eid];
+        gfx.y = Position.y[eid];
+        const kind = Building.kind[eid];
+        const isBuilt = Building.isBuilt[eid] === 1;
+        const progress = Building.buildProgress[eid] / 100;
+        const alpha = isBuilt ? 1.0 : 0.45 + progress * 0.3;
+        _drawBuilding(gfx, kind, isBuilt, alpha, progress);
+    }
+}
+function _drawBuilding(gfx, kind, isBuilt, alpha, progress) {
+    const half = TILE_SIZE / 2;
+    switch (kind) {
+        case 0 /* BuildingKind.Wall */:
+            gfx.fillStyle(0x888899, alpha);
+            gfx.fillRect(-half, -half, TILE_SIZE, TILE_SIZE);
+            if (isBuilt) {
+                gfx.fillStyle(0xaaaacc, 0.3);
+                gfx.fillRect(-half, -half, TILE_SIZE, 4);
+                gfx.lineStyle(1, 0x555566, 0.8);
+                gfx.strokeRect(-half, -half, TILE_SIZE, TILE_SIZE);
+            }
+            else {
+                // 건설 중 진행 바
+                gfx.fillStyle(0x4488ff, 0.7);
+                gfx.fillRect(-half, half - 5, TILE_SIZE * progress, 4);
+                gfx.lineStyle(1, 0x4488ff, 0.5);
+                gfx.strokeRect(-half, -half, TILE_SIZE, TILE_SIZE);
+            }
+            break;
+        case 1 /* BuildingKind.Floor */:
+            gfx.fillStyle(0xc8a060, alpha);
+            gfx.fillRect(-half, -half, TILE_SIZE, TILE_SIZE);
+            if (isBuilt) {
+                gfx.lineStyle(1, 0x997744, 0.4);
+                gfx.strokeRect(-half + 4, -half + 4, TILE_SIZE - 8, TILE_SIZE - 8);
+            }
+            break;
+        case 2 /* BuildingKind.Door */:
+            // Frame
+            gfx.fillStyle(0x8b5e2e, alpha);
+            gfx.fillRect(-half, -half, 4, TILE_SIZE);
+            gfx.fillRect(half - 4, -half, 4, TILE_SIZE);
+            gfx.fillRect(-half, -half, TILE_SIZE, 4);
+            // Door panel
+            gfx.fillStyle(isBuilt ? 0xd4882a : 0xd4882a, alpha * 0.7);
+            gfx.fillRect(-half + 4, -half + 4, TILE_SIZE - 8, TILE_SIZE - 8);
+            break;
+        case 3 /* BuildingKind.Stockpile */:
+            gfx.fillStyle(0xddbb44, 0.25);
+            gfx.fillRect(-half, -half, TILE_SIZE, TILE_SIZE);
+            gfx.lineStyle(2, 0xddbb44, 0.6);
+            gfx.strokeRect(-half + 1, -half + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+            break;
+        case 4 /* BuildingKind.Container */:
+            gfx.fillStyle(0x6b4c2a, alpha);
+            gfx.fillRect(-half + 2, -half + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+            gfx.fillStyle(0x9b7a4a, alpha);
+            gfx.fillRect(-half + 2, -half + 2, TILE_SIZE - 4, 6);
+            gfx.lineStyle(1, 0x4a3010, alpha);
+            gfx.strokeRect(-half + 2, -half + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+            break;
+    }
+}
+// ─── Dropped Items ────────────────────────────────────────────────────────────
+export function renderDroppedItems(ecsWorld) {
+    const eids = droppedQ(ecsWorld);
+    for (const eid of eids) {
+        const gfx = gfxMap.get(eid);
+        if (!gfx)
+            continue;
+        gfx.clear();
+        gfx.x = Position.x[eid];
+        gfx.y = Position.y[eid];
+        const kind = DroppedItem.kind[eid];
+        const amount = DroppedItem.amount[eid];
+        switch (kind) {
+            case 0 /* ItemKind.Wood */:
+                gfx.fillStyle(0x8b5e2e, 1);
+                gfx.fillRect(-7, -4, 14, 8);
+                gfx.fillStyle(0xc89050, 1);
+                gfx.fillRect(-6, -5, 12, 3);
+                break;
+            case 1 /* ItemKind.Stone */:
+                gfx.fillStyle(0x777788, 1);
+                gfx.fillCircle(0, 0, 7);
+                gfx.fillStyle(0x9999aa, 0.6);
+                gfx.fillCircle(-2, -2, 3);
+                break;
+            case 2 /* ItemKind.Food */:
+                gfx.fillStyle(0xdd4422, 1);
+                gfx.fillCircle(0, 0, 6);
+                gfx.fillStyle(0x44aa22, 1);
+                gfx.fillRect(-1, -8, 2, 5);
+                break;
         }
     }
 }
