@@ -1,13 +1,11 @@
 /**
- * JobSystem — 작업 진행, 자원 채취, 완료 처리
- * Bevy: fn job_system(mut colonists: Query<...>, mut resources: Query<&mut Resource>)
+ * JobSystem — 자원 채취 작업 처리 (ChopTree, MineRock)
+ * 완료 시 GameTime에 직접 집계하지 않고 DroppedItem을 맵에 스폰합니다.
  */
 import { defineQuery } from 'bitecs';
-import { Position, ColonistState, JobWorker, IsColonist, Resource, IsResource, } from '../ecs/components';
+import { Position, ColonistState, JobWorker, IsColonist, Resource, } from '../ecs/components';
 const workerQ = defineQuery([IsColonist, Position, ColonistState, JobWorker]);
-const resourceQ = defineQuery([IsResource, Position, Resource]);
 const WORK_RATE = 14; // units per second
-/** jobId → JobEntry lookup (maintained externally via jobQueue._all) */
 export function jobSystem(ecsWorld, time, delta, jobQueue, worldMap, onResourceDied) {
     const mult = time.multiplier;
     if (mult === 0)
@@ -15,73 +13,53 @@ export function jobSystem(ecsWorld, time, delta, jobQueue, worldMap, onResourceD
     const dt = delta * mult;
     const eids = workerQ(ecsWorld);
     for (const eid of eids) {
-        const state = ColonistState.state[eid];
-        if (state !== 2 /* ColonistStateId.Working */)
+        if (ColonistState.state[eid] !== 2 /* ColonistStateId.Working */)
             continue;
         const jobId = JobWorker.jobId[eid];
         if (jobId === -1) {
             ColonistState.state[eid] = 0 /* ColonistStateId.Idle */;
             continue;
         }
-        // Find the job entry
         const job = [...jobQueue._all.values()].find((j) => j.id === jobId);
         if (!job) {
-            // Job gone (maybe target already dead)
             JobWorker.jobId[eid] = -1;
             ColonistState.state[eid] = 0 /* ColonistStateId.Idle */;
             continue;
         }
-        // Check target still alive
+        // Build/Haul 작업은 각자 시스템에서 처리
+        if (job.type === 3 /* JobTypeId.Build */ || job.type === 2 /* JobTypeId.Haul */)
+            continue;
         const targetEid = job.targetEid;
-        if (!isResourceAlive(ecsWorld, targetEid)) {
-            jobQueue.complete(job);
-            JobWorker.jobId[eid] = -1;
-            ColonistState.state[eid] = 0 /* ColonistStateId.Idle */;
-            continue;
-        }
-        // Deal work
-        job.workDone += WORK_RATE * dt;
-        // Damage the resource
-        const dmg = Math.floor(WORK_RATE * dt);
-        if (dmg > 0) {
-            Resource.health[targetEid] = Math.max(0, Resource.health[targetEid] - dmg);
-        }
-        // Resource dead?
         if (Resource.health[targetEid] <= 0) {
-            _harvestResource(ecsWorld, targetEid, time, worldMap);
             jobQueue.complete(job);
             JobWorker.jobId[eid] = -1;
             ColonistState.state[eid] = 0 /* ColonistStateId.Idle */;
-            onResourceDied(targetEid);
             continue;
         }
-        // Job complete (work threshold)?
-        if (job.workDone >= job.workRequired) {
-            _harvestResource(ecsWorld, targetEid, time, worldMap);
+        // Deal damage
+        job.workDone += WORK_RATE * dt;
+        const dmg = Math.floor(WORK_RATE * dt);
+        if (dmg > 0)
+            Resource.health[targetEid] = Math.max(0, Resource.health[targetEid] - dmg);
+        const dead = Resource.health[targetEid] <= 0 || job.workDone >= job.workRequired;
+        if (dead) {
+            const { itemKind, amount } = _calcDrop(targetEid, worldMap);
             jobQueue.complete(job);
             JobWorker.jobId[eid] = -1;
             ColonistState.state[eid] = 0 /* ColonistStateId.Idle */;
-            onResourceDied(targetEid);
+            onResourceDied(targetEid, itemKind, amount);
         }
     }
 }
-function isResourceAlive(ecsWorld, eid) {
-    // Quick check: does it still have the Resource component data?
-    return Resource.health[eid] > 0;
-}
-function _harvestResource(ecsWorld, eid, time, worldMap) {
+function _calcDrop(eid, worldMap) {
     const kind = Resource.kind[eid];
+    // Free tile
+    const { tx, ty } = worldMap.worldToTile(Position.x[eid], Position.y[eid]);
+    worldMap.setBlocked(tx, ty, false);
     if (kind === 0 /* ResourceTypeId.Tree */) {
-        const amount = 8 + Math.floor(Math.random() * 12);
-        time.addResource('wood', amount);
+        return { itemKind: 0 /* ItemKind.Wood */, amount: 8 + Math.floor(Math.random() * 12) };
     }
     else {
-        const amount = 5 + Math.floor(Math.random() * 10);
-        time.addResource('stone', amount);
+        return { itemKind: 1 /* ItemKind.Stone */, amount: 5 + Math.floor(Math.random() * 10) };
     }
-    // Free tile in worldMap
-    const wx = Position.x[eid];
-    const wy = Position.y[eid];
-    const { tx, ty } = worldMap.worldToTile(wx, wy);
-    worldMap.setBlocked(tx, ty, false);
 }
