@@ -9,7 +9,10 @@ import {
   Building, DroppedItem,
   IsColonist, IsResource, IsBuilding, IsDroppedItem,
 } from '../ecs/components'
-import { gfxMap, nameMap, colorMap } from '../ecs/world'
+import { gfxMap, overlayMap, nameMap, colorMap } from '../ecs/world'
+
+/** Returns true if the object is a Phaser Image/Sprite (not Graphics) */
+function isSprite(obj: any): boolean { return obj && obj.texture !== undefined }
 import { ColonistStateId, ResourceTypeId, BuildingKind, ItemKind, BUILDING_DEFS } from '../types'
 import { TILE_SIZE } from '../managers/WorldMap'
 
@@ -79,29 +82,43 @@ export function renderResources(ecsWorld: IWorld): void {
     const gfx = gfxMap.get(eid)
     if (!gfx) continue
 
-    const x = Position.x[eid]
-    const y = Position.y[eid]
-    const kind       = Resource.kind[eid] as ResourceTypeId
+    const x          = Position.x[eid]
+    const y          = Position.y[eid]
     const health     = Resource.health[eid]
     const maxHealth  = Resource.maxHealth[eid]
     const designated = Resource.designated[eid] === 1
 
+    if (isSprite(gfx)) {
+      // Sprite-based: just update position; overlay handles bars
+      gfx.x = x
+      gfx.y = y
+      const ov = overlayMap.get(eid)
+      if (ov) {
+        ov.clear()
+        ov.x = x
+        ov.y = y
+        if (designated) {
+          ov.fillStyle(0xffff00, 0.35)
+          ov.fillCircle(0, 0, TILE_SIZE * 0.6)
+        }
+        if (health < maxHealth) {
+          _bar(ov, -12, 10, 24, 3, health / maxHealth,
+            health / maxHealth > 0.5 ? 0x33cc33 : 0xff4444)
+        }
+      }
+      continue
+    }
+
+    // Graphics fallback
+    const kind = Resource.kind[eid] as ResourceTypeId
     gfx.clear()
     gfx.x = x
     gfx.y = y
-
     if (designated) {
       gfx.fillStyle(0xffff00, 0.3)
       gfx.fillCircle(0, 0, 16)
     }
-
-    if (kind === ResourceTypeId.Tree) {
-      _drawTree(gfx)
-    } else {
-      _drawRock(gfx)
-    }
-
-    // Health bar (only if damaged)
+    if (kind === ResourceTypeId.Tree) { _drawTree(gfx) } else { _drawRock(gfx) }
     if (health < maxHealth) {
       _bar(gfx, -12, 14, 24, 3, health / maxHealth,
         health / maxHealth > 0.5 ? 0x33cc33 : 0xff4444)
@@ -117,15 +134,34 @@ export function renderBuildings(ecsWorld: IWorld): void {
     const gfx = gfxMap.get(eid)
     if (!gfx) continue
 
+    const kind    = Building.kind[eid] as BuildingKind
+    const isBuilt = Building.isBuilt[eid] === 1
+    const progress = Building.buildProgress[eid] / 100
+
+    if (isSprite(gfx)) {
+      gfx.x = Position.x[eid]
+      gfx.y = Position.y[eid]
+      gfx.alpha = isBuilt ? 1.0 : 0.45 + progress * 0.3
+      const ov = overlayMap.get(eid)
+      if (ov) {
+        ov.clear()
+        ov.x = gfx.x
+        ov.y = gfx.y
+        if (!isBuilt) {
+          const half = TILE_SIZE / 2
+          ov.fillStyle(0x000000, 0.4)
+          ov.fillRect(-half, half - 6, TILE_SIZE, 5)
+          ov.fillStyle(0x44aaff, 0.9)
+          ov.fillRect(-half, half - 6, TILE_SIZE * progress, 5)
+        }
+      }
+      continue
+    }
+
     gfx.clear()
     gfx.x = Position.x[eid]
     gfx.y = Position.y[eid]
-
-    const kind      = Building.kind[eid] as BuildingKind
-    const isBuilt   = Building.isBuilt[eid] === 1
-    const progress  = Building.buildProgress[eid] / 100
-    const alpha     = isBuilt ? 1.0 : 0.45 + progress * 0.3
-
+    const alpha = isBuilt ? 1.0 : 0.45 + progress * 0.3
     _drawBuilding(gfx, kind, isBuilt, alpha, progress)
   }
 }
@@ -201,6 +237,12 @@ export function renderDroppedItems(ecsWorld: IWorld): void {
   for (const eid of eids) {
     const gfx = gfxMap.get(eid)
     if (!gfx) continue
+
+    if (isSprite(gfx)) {
+      gfx.x = Position.x[eid]
+      gfx.y = Position.y[eid]
+      continue
+    }
 
     gfx.clear()
     gfx.x = Position.x[eid]

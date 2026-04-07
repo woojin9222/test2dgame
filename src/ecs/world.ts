@@ -16,7 +16,11 @@ export const world: IWorld = createWorld()
 // ─── Non-ECS side-data (Phaser can't live in TypedArrays) ────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const gfxMap = new Map<number, any>() // Phaser.GameObjects.Graphics
+export const gfxMap = new Map<number, any>() // Phaser.GameObjects.Graphics or Image/Sprite
+
+/** Overlay graphics for health bars / progress bars on sprite-based entities */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const overlayMap = new Map<number, any>() // Phaser.GameObjects.Graphics
 
 /** eid → path of world-pixel waypoints */
 export const pathMap = new Map<number, { x: number; y: number }[]>()

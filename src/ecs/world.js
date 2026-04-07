@@ -6,7 +6,10 @@ import { Position, Hunger, Energy, Mood, ColonistState, JobWorker, IdleTimer, Re
 export const world = createWorld();
 // ─── Non-ECS side-data (Phaser can't live in TypedArrays) ────────────────────
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const gfxMap = new Map(); // Phaser.GameObjects.Graphics
+export const gfxMap = new Map(); // Phaser.GameObjects.Graphics or Image/Sprite
+/** Overlay graphics for health bars / progress bars on sprite-based entities */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const overlayMap = new Map(); // Phaser.GameObjects.Graphics
 /** eid → path of world-pixel waypoints */
 export const pathMap = new Map();
 /** eid → current waypoint index */

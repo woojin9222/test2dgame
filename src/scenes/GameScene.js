@@ -3,7 +3,7 @@
  */
 import Phaser from 'phaser';
 import { removeEntity } from 'bitecs';
-import { world, spawnColonist, spawnResource, spawnDroppedItem, gfxMap } from '../ecs/world';
+import { world, spawnColonist, spawnResource, spawnDroppedItem, gfxMap, overlayMap } from '../ecs/world';
 import { Resource, Position } from '../ecs/components';
 import { WorldMap, TILE_SIZE, MAP_W, MAP_H, TILE_COLORS } from '../managers/WorldMap';
 import { JobQueue } from '../managers/JobQueue';
@@ -50,6 +50,13 @@ export class GameScene extends Phaser.Scene {
     _designStart = null;
     constructor() { super('Game'); }
     // ─── Lifecycle ────────────────────────────────────────────────────────────────
+    preload() {
+        this.load.image('tree', 'assets/tree.png');
+        this.load.image('rock', 'assets/rock.png');
+        this.load.image('container', 'assets/container.png');
+        this.load.image('stockpile', 'assets/stockpile.png');
+        this.load.image('item_food', 'assets/item_food.png');
+    }
     create() {
         this.worldMap = new WorldMap();
         this.jobQueue = new JobQueue();
@@ -127,7 +134,11 @@ export class GameScene extends Phaser.Scene {
     _makeResource(tx, ty, kind) {
         const { wx, wy } = this.worldMap.tileToWorld(tx, ty);
         const eid = spawnResource(wx, wy, kind);
-        gfxMap.set(eid, this.add.graphics());
+        const key = kind === 0 /* ResourceTypeId.Tree */ ? 'tree' : 'rock';
+        const spr = this.add.image(wx, wy, key).setDisplaySize(TILE_SIZE, TILE_SIZE);
+        spr.setDepth(2);
+        gfxMap.set(eid, spr);
+        overlayMap.set(eid, this.add.graphics().setDepth(3));
         this._resourceEids.add(eid);
         this.worldMap.setBlocked(tx, ty, true);
     }
@@ -207,10 +218,22 @@ export class GameScene extends Phaser.Scene {
     _confirmBuild(from, to) {
         const kind = this.activeBuildKind;
         const tiles = this._getDragTiles(from, to);
+        const SPRITE_KINDS = new Set([4 /* BuildingKind.Container */, 3 /* BuildingKind.Stockpile */]);
+        const SPRITE_KEYS = {
+            [4 /* BuildingKind.Container */]: 'container',
+            [3 /* BuildingKind.Stockpile */]: 'stockpile',
+        };
         for (const { tx, ty } of tiles) {
             const eid = this.buildingMgr.place(tx, ty, kind);
             if (eid !== -1) {
-                gfxMap.set(eid, this.add.graphics());
+                if (SPRITE_KINDS.has(kind)) {
+                    const spr = this.add.image(Position.x[eid], Position.y[eid], SPRITE_KEYS[kind]).setDisplaySize(TILE_SIZE, TILE_SIZE).setDepth(2);
+                    gfxMap.set(eid, spr);
+                    overlayMap.set(eid, this.add.graphics().setDepth(3));
+                }
+                else {
+                    gfxMap.set(eid, this.add.graphics().setDepth(2));
+                }
                 this.buildingMgr.buildingEids.add(eid);
             }
         }
@@ -454,6 +477,11 @@ export class GameScene extends Phaser.Scene {
             gfx.destroy();
             gfxMap.delete(eid);
         }
+        const overlay = overlayMap.get(eid);
+        if (overlay) {
+            overlay.destroy();
+            overlayMap.delete(eid);
+        }
         this._resourceEids.delete(eid);
         removeEntity(world, eid);
         // 창고가 있으면 DroppedItem 스폰, 없으면 바로 집계
@@ -468,7 +496,13 @@ export class GameScene extends Phaser.Scene {
     }
     _spawnDroppedItem(wx, wy, kind, amount) {
         const eid = spawnDroppedItem(wx, wy, kind, amount);
-        gfxMap.set(eid, this.add.graphics());
+        if (kind === 2 /* ItemKind.Food */) {
+            const spr = this.add.image(wx, wy, 'item_food').setDisplaySize(8, 8).setDepth(2);
+            gfxMap.set(eid, spr);
+        }
+        else {
+            gfxMap.set(eid, this.add.graphics().setDepth(2));
+        }
         this._droppedEids.add(eid);
     }
     _onItemDelivered(kind, amount) {
