@@ -1,22 +1,20 @@
-import { Start } from './scenes/Scene.js';
-
+import Phaser from 'phaser';
+import { GameScene } from './scenes/GameScene';
+import { UIScene } from './scenes/UIScene';
 const config = {
     type: Phaser.AUTO,
-    title: 'Overlord Rising',
-    description: '',
-    parent: 'game-container',
+    parent: 'game',
     width: 1280,
     height: 720,
-    backgroundColor: '#000000',
+    backgroundColor: '#0d0d1a',
     pixelArt: false,
-    scene: [
-        Start
-    ],
+    dom: {
+        createContainer: true // needed for UIScene HTML elements
+    },
     scale: {
         mode: Phaser.Scale.FIT,
-        autoCenter: Phaser.Scale.CENTER_BOTH
+        autoCenter: Phaser.Scale.CENTER_BOTH,
     },
-}
-
+    scene: [GameScene, UIScene],
+};
 new Phaser.Game(config);
-            

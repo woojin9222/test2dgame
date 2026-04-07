@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noImplicitReturns": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@ecs/*": ["src/ecs/*"],
+      "@managers/*": ["src/managers/*"],
+      "@systems/*": ["src/systems/*"],
+      "@scenes/*": ["src/scenes/*"]
+    }
+  },
+  "include": ["src/**/*", "electron/**/*"]
+}

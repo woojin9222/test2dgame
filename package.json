@@ -1,0 +1,41 @@
+{
+  "name": "colony-survival",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "electron:dev": "concurrently \"vite --port 3000\" \"wait-on http://localhost:3000 && electron electron/main.js\"",
+    "electron:build": "vite build && electron-builder",
+    "cap:sync": "vite build && cap sync",
+    "cap:android": "vite build && cap sync && cap open android",
+    "cap:ios": "vite build && cap sync && cap open ios"
+  },
+  "dependencies": {
+    "bitecs": "^0.3.40",
+    "phaser": "^3.80.1"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^6.1.0",
+    "@capacitor/cli": "^6.1.0",
+    "@capacitor/core": "^6.1.0",
+    "@capacitor/ios": "^6.1.0",
+    "@types/node": "^20.14.0",
+    "concurrently": "^8.2.0",
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.0",
+    "typescript": "^5.4.5",
+    "vite": "^5.3.0",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.colony.survival",
+    "productName": "Colony Survival",
+    "directories": { "output": "dist-electron" },
+    "files": ["dist/**/*", "electron/**/*"],
+    "win": { "target": "nsis" },
+    "mac": { "target": "dmg" },
+    "linux": { "target": "AppImage" }
+  }
+}
