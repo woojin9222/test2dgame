@@ -106,9 +106,15 @@ export class UIScene extends Phaser.Scene {
             background:#1e1e3a;border:1px solid #445;color:#ccd;
             padding:3px 8px;cursor:pointer;border-radius:3px;font-size:12px">${t}</button>`).join('')}
       </span>
-      <span style="font-size:10px;color:${DIM}">RMB: designate | MMB: pan | Scroll: zoom | WASD: camera</span>
+      <span id="hint-text" style="font-size:10px;color:${DIM}">RMB: 지정 | MMB: 이동 | 휠: 줌 | WASD: 카메라</span>
     </div>`;
         this._topBar = this.add.dom(0, 0).createFromHTML(html).setOrigin(0, 0);
+        // 모바일이면 힌트 텍스트 변경
+        if (!this.sys.game.device.os.desktop) {
+            const hint = this._topBar.node.querySelector('#hint-text');
+            if (hint)
+                hint.textContent = '탭: 선택 | 길게누름: 지정 | 두손가락: 이동/줌';
+        }
     }
     _createLeftPanel() {
         const html = `
@@ -163,6 +169,51 @@ export class UIScene extends Phaser.Scene {
             this._selectedEid = eid;
             this._infoPanel.setVisible(true);
         };
+        // 모바일 전용 하단 버튼
+        if (!this.sys.game.device.os.desktop) {
+            this._createMobileButtons();
+        }
+    }
+    _createMobileButtons() {
+        const btnStyle = `
+      background:rgba(20,20,50,0.9);
+      border:2px solid #446;
+      color:#cce;
+      font-size:22px;
+      width:56px;height:56px;
+      border-radius:12px;
+      cursor:pointer;
+      display:flex;align-items:center;justify-content:center;
+      touch-action:manipulation;
+      -webkit-tap-highlight-color:transparent;
+    `;
+        const html = `
+    <div style="display:flex;gap:10px;">
+      <button id="btn-designate" style="${btnStyle}" title="지정 (길게누름과 동일)">🪓</button>
+      <button id="btn-cancel"    style="${btnStyle}" title="지정 취소">✖</button>
+      <button id="btn-speed"     style="${btnStyle}" title="속도">▶</button>
+    </div>`;
+        const bar = this.add.dom(10, 710).createFromHTML(html).setOrigin(0, 1);
+        let _designateMode = false;
+        bar.node.querySelector('#btn-designate').addEventListener('click', () => {
+            _designateMode = !_designateMode;
+            const btn = bar.node.querySelector('#btn-designate');
+            btn.style.borderColor = _designateMode ? '#ff0' : '#446';
+            window.__designateMode = _designateMode;
+        });
+        bar.node.querySelector('#btn-cancel').addEventListener('click', () => {
+            _designateMode = false;
+            const btn = bar.node.querySelector('#btn-designate');
+            btn.style.borderColor = '#446';
+            window.__designateMode = false;
+        });
+        let _speedIdx = 1;
+        bar.node.querySelector('#btn-speed').addEventListener('click', () => {
+            _speedIdx = (_speedIdx + 1) % 4;
+            this._game.gameTime.setSpeed(_speedIdx);
+            const labels = ['⏸', '▶', '▶▶', '▶▶▶'];
+            bar.node.querySelector('#btn-speed').textContent = labels[_speedIdx];
+        });
     }
     showTooltip(msg, duration = 2) {
         const el = this._tooltip.node.querySelector('#tooltip');

@@ -140,40 +140,116 @@ export class GameScene extends Phaser.Scene {
         }
     }
     // ─── Input ────────────────────────────────────────────────────────────────────
+    // 롱프레스 상태 (모바일 지정용)
+    _longPressTimer = null;
+    _longPressPointer = null;
+    _didLongPress = false;
+    _touchPanActive = false;
+    _touchPanStart = new Phaser.Math.Vector2();
+    _touchCamStart = new Phaser.Math.Vector2();
     _setupInput() {
         const cam = this.cameras.main;
-        // Middle mouse pan
+        const isMobile = !this.sys.game.device.os.desktop;
         this.input.on('pointerdown', (p) => {
-            if (p.middleButtonDown()) {
-                this._panning = true;
-                this._panStart.set(p.x, p.y);
-                this._camStart.set(cam.scrollX, cam.scrollY);
+            // ── PC ──────────────────────────────────────────────
+            if (!isMobile) {
+                if (p.middleButtonDown()) {
+                    this._panning = true;
+                    this._panStart.set(p.x, p.y);
+                    this._camStart.set(cam.scrollX, cam.scrollY);
+                }
+                if (p.rightButtonDown())
+                    this._onRightClick(p);
+                if (p.leftButtonDown())
+                    this._onLeftClick(p);
+                return;
             }
-            if (p.rightButtonDown())
-                this._onRightClick(p);
-            if (p.leftButtonDown())
-                this._onLeftClick(p);
+            // ── 모바일 ──────────────────────────────────────────
+            this._didLongPress = false;
+            if (this.input.pointer1.isDown && this.input.pointer2.isDown) {
+                // 두 손가락 = 패닝
+                this._touchPanActive = true;
+                this._touchPanStart.set(p.x, p.y);
+                this._touchCamStart.set(cam.scrollX, cam.scrollY);
+                this._cancelLongPress();
+                return;
+            }
+            // 롱프레스 타이머 (600ms)
+            this._longPressPointer = p;
+            this._longPressTimer = this.time.addEvent({
+                delay: 600,
+                callback: () => {
+                    this._didLongPress = true;
+                    if (this._longPressPointer)
+                        this._onRightClick(this._longPressPointer);
+                    // 진동 피드백 (지원 기기)
+                    if (navigator.vibrate)
+                        navigator.vibrate(40);
+                },
+            });
         });
         this.input.on('pointermove', (p) => {
+            // PC 패닝
             if (this._panning) {
                 const dx = (p.x - this._panStart.x) / cam.zoom;
                 const dy = (p.y - this._panStart.y) / cam.zoom;
                 cam.setScroll(this._camStart.x - dx, this._camStart.y - dy);
             }
+            // 모바일 한 손가락 패닝
+            if (isMobile && p.isDown && !this._touchPanActive) {
+                const dx = (p.x - (this._longPressPointer?.x ?? p.x)) / cam.zoom;
+                const dy = (p.y - (this._longPressPointer?.y ?? p.y)) / cam.zoom;
+                // 많이 움직이면 롱프레스 취소
+                if (Math.abs(dx) + Math.abs(dy) > 10)
+                    this._cancelLongPress();
+                cam.setScroll(this._touchCamStart.x - dx, this._touchCamStart.y - dy);
+            }
         });
         this.input.on('pointerup', (p) => {
             if (!p.middleButtonDown())
                 this._panning = false;
+            this._touchPanActive = false;
+            if (isMobile && !this._didLongPress) {
+                this._cancelLongPress();
+                // 짧게 탭 = 선택
+                this._onLeftClick(p);
+            }
         });
-        // Scroll zoom
+        // 핀치 줌 (모바일)
+        if (isMobile) {
+            let _lastDist = 0;
+            this.input.on('pointermove', () => {
+                if (this.input.pointer1.isDown && this.input.pointer2.isDown) {
+                    const dx = this.input.pointer1.x - this.input.pointer2.x;
+                    const dy = this.input.pointer1.y - this.input.pointer2.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (_lastDist > 0) {
+                        const z = Phaser.Math.Clamp(cam.zoom * (dist / _lastDist), 0.3, 4);
+                        cam.setZoom(z);
+                    }
+                    _lastDist = dist;
+                }
+                else {
+                    _lastDist = 0;
+                }
+            });
+        }
+        // 스크롤 줌 (PC)
         this.input.on('wheel', (_p, _gos, _dx, dy) => {
             const z = Phaser.Math.Clamp(cam.zoom * (dy > 0 ? 0.9 : 1.1), 0.3, 4);
             cam.setZoom(z);
         });
-        // WASD camera movement in update
+        // WASD
         this.events.on('update', (_t, delta) => {
             this._cameraKeys(delta / 1000);
         });
+    }
+    _cancelLongPress() {
+        if (this._longPressTimer) {
+            this._longPressTimer.remove();
+            this._longPressTimer = null;
+        }
+        this._longPressPointer = null;
     }
     _cameraKeys(dt) {
         const keys = this.input.keyboard;
@@ -223,9 +299,13 @@ export class GameScene extends Phaser.Scene {
         }
     }
     _onLeftClick(_p) {
-        // Selection logic handled in UIScene via event
         const wx = _p.worldX;
         const wy = _p.worldY;
+        // 모바일 지정 모드: 탭이 지정 역할
+        if (window.__designateMode) {
+            this._onRightClick(_p);
+            return;
+        }
         let bestDist = 15;
         let bestEid = -1;
         for (const eid of this._colonistEids) {
