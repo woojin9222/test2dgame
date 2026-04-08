@@ -88,7 +88,10 @@ export class GameScene extends Phaser.Scene {
         this._spawnColonists();
         const cx = (MAP_W * TILE_SIZE) / 2;
         const cy = (MAP_H * TILE_SIZE) / 2;
-        this.cameras.main.setZoom(1.6);
+        // 모바일: 캔버스 1280px→375px 축소 보정 (zoom 4 = 타일 ~19px on screen)
+        const isMobile = !this.sys.game.device.os.desktop;
+        const initZoom = isMobile ? 4.0 : 1.6;
+        this.cameras.main.setZoom(initZoom);
         this.cameras.main.centerOn(cx, cy);
         this.cameras.main.setBounds(0, 0, MAP_W * TILE_SIZE, MAP_H * TILE_SIZE);
         this._setupInput();
