@@ -63,10 +63,15 @@ export class GameScene extends Phaser.Scene {
         this.load.image('colonist', 'assets/colonist.png');
         this.load.image('colonist2', 'assets/colonist2.png');
         this.load.image('colonist3', 'assets/colonist3.png');
-        this.load.image('tile_grass', 'assets/tile_grass.png');
-        this.load.image('tile_water', 'assets/tile_water.png');
-        this.load.image('tile_stone_ground', 'assets/tile_stone_ground.png');
-        this.load.image('tile_dirt', 'assets/tile_dirt.png');
+        // Tile variants
+        for (let i = 1; i <= 5; i++)
+            this.load.image(`tile_grass${i === 1 ? '' : i}`, `assets/tile_grass${i === 1 ? '' : i}.png`);
+        for (let i = 1; i <= 3; i++)
+            this.load.image(`tile_stone_ground${i === 1 ? '' : i}`, `assets/tile_stone_ground${i === 1 ? '' : i}.png`);
+        for (let i = 1; i <= 2; i++)
+            this.load.image(`tile_dirt${i === 1 ? '' : i}`, `assets/tile_dirt${i === 1 ? '' : i}.png`);
+        for (let i = 1; i <= 2; i++)
+            this.load.image(`tile_water${i === 1 ? '' : i}`, `assets/tile_water${i === 1 ? '' : i}.png`);
     }
     create() {
         this.worldMap = new WorldMap();
@@ -111,47 +116,45 @@ export class GameScene extends Phaser.Scene {
     }
     // ─── World rendering ─────────────────────────────────────────────────────────
     _drawTiles() {
-        const TILE_KEYS = {
-            [0 /* TileType.Grass */]: 'tile_grass',
-            [1 /* TileType.Dirt */]: 'tile_dirt',
-            [2 /* TileType.Stone */]: 'tile_stone_ground',
-            [3 /* TileType.DeepStone */]: 'tile_stone_ground',
-            [4 /* TileType.Water */]: 'tile_water',
+        // Tile variant pools per type
+        const VARIANTS = {
+            [0 /* TileType.Grass */]: ['tile_grass', 'tile_grass2', 'tile_grass3', 'tile_grass4', 'tile_grass5'],
+            [1 /* TileType.Dirt */]: ['tile_dirt', 'tile_dirt2'],
+            [2 /* TileType.Stone */]: ['tile_stone_ground', 'tile_stone_ground2', 'tile_stone_ground3'],
+            [3 /* TileType.DeepStone */]: ['tile_stone_ground', 'tile_stone_ground2'],
+            [4 /* TileType.Water */]: ['tile_water', 'tile_water2'],
         };
-        // Check if tile textures are loaded; fallback to Graphics if not
-        const hasSprites = this.textures.exists('tile_grass');
-        if (hasSprites) {
-            const rt = this.add.renderTexture(0, 0, MAP_W * TILE_SIZE, MAP_H * TILE_SIZE);
-            rt.setDepth(0);
-            for (let ty = 0; ty < MAP_H; ty++) {
-                for (let tx = 0; tx < MAP_W; tx++) {
-                    const tile = this.worldMap.getTile(tx, ty);
-                    rt.drawFrame(TILE_KEYS[tile], undefined, tx * TILE_SIZE, ty * TILE_SIZE);
-                }
-            }
-            // DeepStone: darken with a tinted rect overlay
-            const g = this._tileGfx;
-            g.setDepth(0);
-            for (let ty = 0; ty < MAP_H; ty++) {
-                for (let tx = 0; tx < MAP_W; tx++) {
-                    if (this.worldMap.getTile(tx, ty) === 3 /* TileType.DeepStone */) {
-                        g.fillStyle(0x000000, 0.35);
-                        g.fillRect(tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-                    }
-                }
-            }
-        }
-        else {
+        if (!this.textures.exists('tile_grass')) {
             // Fallback: colored rects
             const g = this._tileGfx;
-            for (let ty = 0; ty < MAP_H; ty++) {
+            for (let ty = 0; ty < MAP_H; ty++)
                 for (let tx = 0; tx < MAP_W; tx++) {
                     const tile = this.worldMap.getTile(tx, ty);
                     g.fillStyle(TILE_COLORS[tile], 1);
                     g.fillRect(tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, TILE_SIZE);
                 }
+            return;
+        }
+        const rt = this.add.renderTexture(0, 0, MAP_W * TILE_SIZE, MAP_H * TILE_SIZE);
+        rt.setDepth(0);
+        for (let ty = 0; ty < MAP_H; ty++) {
+            for (let tx = 0; tx < MAP_W; tx++) {
+                const tile = this.worldMap.getTile(tx, ty);
+                const pool = VARIANTS[tile];
+                // Deterministic pseudo-random based on tile position (no frame-to-frame change)
+                const variant = pool[(tx * 7 + ty * 13) % pool.length];
+                rt.drawFrame(variant, undefined, tx * TILE_SIZE, ty * TILE_SIZE);
             }
         }
+        // DeepStone darkening overlay
+        const g = this._tileGfx;
+        g.setDepth(1);
+        for (let ty = 0; ty < MAP_H; ty++)
+            for (let tx = 0; tx < MAP_W; tx++)
+                if (this.worldMap.getTile(tx, ty) === 3 /* TileType.DeepStone */) {
+                    g.fillStyle(0x000000, 0.4);
+                    g.fillRect(tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                }
     }
     // ─── Spawn helpers ────────────────────────────────────────────────────────────
     _spawnResources() {
