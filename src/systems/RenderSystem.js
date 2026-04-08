@@ -32,26 +32,38 @@ export function renderColonists(ecsWorld) {
         const state = ColonistState.state[eid];
         const hunger = Hunger.value[eid];
         const energy = Energy.value[eid];
+        if (isSprite(gfx)) {
+            gfx.x = x;
+            gfx.y = y;
+            const ov = overlayMap.get(eid);
+            if (ov) {
+                ov.clear();
+                ov.x = x;
+                ov.y = y;
+                // State dot
+                ov.fillStyle(STATE_COLORS[state], 1);
+                ov.fillCircle(0, -12, 4);
+                // Hunger bar
+                _bar(ov, -10, 10, 20, 3, hunger / 100, hunger > 30 ? 0x33cc33 : 0xff2222);
+                // Energy bar
+                _bar(ov, -10, 15, 20, 3, energy / 100, energy > 30 ? 0x2266ff : 0xff8800);
+            }
+            continue;
+        }
+        // Graphics fallback
         const color = colorMap.get(eid) ?? 0x00ffff;
         gfx.clear();
         gfx.x = x;
         gfx.y = y;
-        // Shadow
         gfx.fillStyle(0x000000, 0.25);
         gfx.fillEllipse(0, 9, 20, 7);
-        // Body
         gfx.fillStyle(color, 1);
         gfx.fillCircle(0, 0, 10);
         gfx.lineStyle(1.5, 0xffffff, 1);
         gfx.strokeCircle(0, 0, 10);
-        // State dot
         gfx.fillStyle(STATE_COLORS[state], 1);
         gfx.fillCircle(0, -14, 4);
-        gfx.lineStyle(1, 0xffffff, 0.8);
-        gfx.strokeCircle(0, -14, 4);
-        // Hunger bar
         _bar(gfx, -12, 13, 24, 3, hunger / 100, hunger > 30 ? 0x33cc33 : 0xff2222);
-        // Energy bar
         _bar(gfx, -12, 18, 24, 3, energy / 100, energy > 30 ? 0x2266ff : 0xff8800);
     }
 }

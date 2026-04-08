@@ -38,40 +38,40 @@ export function renderColonists(ecsWorld: IWorld): void {
     const gfx = gfxMap.get(eid)
     if (!gfx) continue
 
-    const x = Position.x[eid]
-    const y = Position.y[eid]
+    const x      = Position.x[eid]
+    const y      = Position.y[eid]
     const state  = ColonistState.state[eid] as ColonistStateId
     const hunger = Hunger.value[eid]
     const energy = Energy.value[eid]
-    const color  = colorMap.get(eid) ?? 0x00ffff
 
-    gfx.clear()
-    gfx.x = x
-    gfx.y = y
+    if (isSprite(gfx)) {
+      gfx.x = x
+      gfx.y = y
+      const ov = overlayMap.get(eid)
+      if (ov) {
+        ov.clear()
+        ov.x = x
+        ov.y = y
+        // State dot
+        ov.fillStyle(STATE_COLORS[state], 1)
+        ov.fillCircle(0, -12, 4)
+        // Hunger bar
+        _bar(ov, -10, 10, 20, 3, hunger / 100, hunger > 30 ? 0x33cc33 : 0xff2222)
+        // Energy bar
+        _bar(ov, -10, 15, 20, 3, energy / 100, energy > 30 ? 0x2266ff : 0xff8800)
+      }
+      continue
+    }
 
-    // Shadow
-    gfx.fillStyle(0x000000, 0.25)
-    gfx.fillEllipse(0, 9, 20, 7)
-
-    // Body
-    gfx.fillStyle(color, 1)
-    gfx.fillCircle(0, 0, 10)
-    gfx.lineStyle(1.5, 0xffffff, 1)
-    gfx.strokeCircle(0, 0, 10)
-
-    // State dot
-    gfx.fillStyle(STATE_COLORS[state], 1)
-    gfx.fillCircle(0, -14, 4)
-    gfx.lineStyle(1, 0xffffff, 0.8)
-    gfx.strokeCircle(0, -14, 4)
-
-    // Hunger bar
-    _bar(gfx, -12, 13, 24, 3, hunger / 100,
-      hunger > 30 ? 0x33cc33 : 0xff2222)
-
-    // Energy bar
-    _bar(gfx, -12, 18, 24, 3, energy / 100,
-      energy > 30 ? 0x2266ff : 0xff8800)
+    // Graphics fallback
+    const color = colorMap.get(eid) ?? 0x00ffff
+    gfx.clear(); gfx.x = x; gfx.y = y
+    gfx.fillStyle(0x000000, 0.25); gfx.fillEllipse(0, 9, 20, 7)
+    gfx.fillStyle(color, 1); gfx.fillCircle(0, 0, 10)
+    gfx.lineStyle(1.5, 0xffffff, 1); gfx.strokeCircle(0, 0, 10)
+    gfx.fillStyle(STATE_COLORS[state], 1); gfx.fillCircle(0, -14, 4)
+    _bar(gfx, -12, 13, 24, 3, hunger / 100, hunger > 30 ? 0x33cc33 : 0xff2222)
+    _bar(gfx, -12, 18, 24, 3, energy / 100, energy > 30 ? 0x2266ff : 0xff8800)
   }
 }
 

@@ -68,11 +68,22 @@ export class GameScene extends Phaser.Scene {
   // ─── Lifecycle ────────────────────────────────────────────────────────────────
 
   preload(): void {
-    this.load.image('tree',      'assets/tree.png')
-    this.load.image('rock',      'assets/rock.png')
-    this.load.image('container', 'assets/container.png')
-    this.load.image('stockpile', 'assets/stockpile.png')
-    this.load.image('item_food', 'assets/item_food.png')
+    this.load.image('tree',              'assets/tree.png')
+    this.load.image('rock',              'assets/rock.png')
+    this.load.image('container',         'assets/container.png')
+    this.load.image('stockpile',         'assets/stockpile.png')
+    this.load.image('item_food',         'assets/item_food.png')
+    this.load.image('item_wood',         'assets/item_wood.png')
+    this.load.image('item_stone',        'assets/item_stone.png')
+    this.load.image('wall',              'assets/wall.png')
+    this.load.image('floor',             'assets/floor.png')
+    this.load.image('colonist',          'assets/colonist.png')
+    this.load.image('colonist2',         'assets/colonist2.png')
+    this.load.image('colonist3',         'assets/colonist3.png')
+    this.load.image('tile_grass',        'assets/tile_grass.png')
+    this.load.image('tile_water',        'assets/tile_water.png')
+    this.load.image('tile_stone_ground', 'assets/tile_stone_ground.png')
+    this.load.image('tile_dirt',         'assets/tile_dirt.png')
   }
 
   create(): void {
@@ -133,14 +144,44 @@ export class GameScene extends Phaser.Scene {
   // ─── World rendering ─────────────────────────────────────────────────────────
 
   private _drawTiles(): void {
-    const g = this._tileGfx
-    for (let ty = 0; ty < MAP_H; ty++) {
-      for (let tx = 0; tx < MAP_W; tx++) {
-        const tile = this.worldMap.getTile(tx, ty)
-        g.fillStyle(TILE_COLORS[tile], 1)
-        g.fillRect(tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, TILE_SIZE)
-        g.lineStyle(1, 0x000000, 0.07)
-        g.strokeRect(tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+    const TILE_KEYS: Record<TileType, string> = {
+      [TileType.Grass]:     'tile_grass',
+      [TileType.Dirt]:      'tile_dirt',
+      [TileType.Stone]:     'tile_stone_ground',
+      [TileType.DeepStone]: 'tile_stone_ground',
+      [TileType.Water]:     'tile_water',
+    }
+    // Check if tile textures are loaded; fallback to Graphics if not
+    const hasSprites = this.textures.exists('tile_grass')
+    if (hasSprites) {
+      const rt = this.add.renderTexture(0, 0, MAP_W * TILE_SIZE, MAP_H * TILE_SIZE)
+      rt.setDepth(0)
+      for (let ty = 0; ty < MAP_H; ty++) {
+        for (let tx = 0; tx < MAP_W; tx++) {
+          const tile = this.worldMap.getTile(tx, ty)
+          rt.drawFrame(TILE_KEYS[tile], undefined, tx * TILE_SIZE, ty * TILE_SIZE)
+        }
+      }
+      // DeepStone: darken with a tinted rect overlay
+      const g = this._tileGfx
+      g.setDepth(0)
+      for (let ty = 0; ty < MAP_H; ty++) {
+        for (let tx = 0; tx < MAP_W; tx++) {
+          if (this.worldMap.getTile(tx, ty) === TileType.DeepStone) {
+            g.fillStyle(0x000000, 0.35)
+            g.fillRect(tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+          }
+        }
+      }
+    } else {
+      // Fallback: colored rects
+      const g = this._tileGfx
+      for (let ty = 0; ty < MAP_H; ty++) {
+        for (let tx = 0; tx < MAP_W; tx++) {
+          const tile = this.worldMap.getTile(tx, ty)
+          g.fillStyle(TILE_COLORS[tile], 1)
+          g.fillRect(tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+        }
       }
     }
   }
@@ -180,13 +221,19 @@ export class GameScene extends Phaser.Scene {
   private _spawnColonists(): void {
     const cx = Math.floor(MAP_W / 2)
     const cy = Math.floor(MAP_H / 2)
+    const charKeys = ['colonist', 'colonist2', 'colonist3']
     for (let i = 0; i < NUM_COLONISTS; i++) {
       let tx = cx + Math.round((Math.random() - 0.5) * 6)
       let ty = cy + Math.round((Math.random() - 0.5) * 6)
       if (!this.worldMap.isWalkable(tx, ty)) { tx = cx; ty = cy }
       const { wx, wy } = this.worldMap.tileToWorld(tx, ty)
-      const eid = spawnColonist(wx, wy, COLONIST_NAMES[i % COLONIST_NAMES.length], COLONIST_COLORS[i % COLONIST_COLORS.length])
-      gfxMap.set(eid, this.add.graphics())
+      const color = COLONIST_COLORS[i % COLONIST_COLORS.length]
+      const eid = spawnColonist(wx, wy, COLONIST_NAMES[i % COLONIST_NAMES.length], color)
+      const key = charKeys[i % charKeys.length]
+      const spr = this.add.image(wx, wy, key).setDisplaySize(TILE_SIZE, TILE_SIZE).setDepth(4)
+      spr.setTint(color)
+      gfxMap.set(eid, spr)
+      overlayMap.set(eid, this.add.graphics().setDepth(5))
       this._colonistEids.push(eid)
     }
   }
@@ -257,10 +304,12 @@ export class GameScene extends Phaser.Scene {
   private _confirmBuild(from: { tx: number; ty: number }, to: { tx: number; ty: number }): void {
     const kind  = this.activeBuildKind as BuildingKind
     const tiles = this._getDragTiles(from, to)
-    const SPRITE_KINDS = new Set([BuildingKind.Container, BuildingKind.Stockpile])
+    const SPRITE_KINDS = new Set([BuildingKind.Container, BuildingKind.Stockpile, BuildingKind.Wall, BuildingKind.Floor])
     const SPRITE_KEYS: Partial<Record<BuildingKind, string>> = {
       [BuildingKind.Container]: 'container',
       [BuildingKind.Stockpile]: 'stockpile',
+      [BuildingKind.Wall]:      'wall',
+      [BuildingKind.Floor]:     'floor',
     }
 
     for (const { tx, ty } of tiles) {
@@ -529,8 +578,14 @@ export class GameScene extends Phaser.Scene {
 
   private _spawnDroppedItem(wx: number, wy: number, kind: ItemKind, amount: number): void {
     const eid = spawnDroppedItem(wx, wy, kind, amount)
-    if (kind === ItemKind.Food) {
-      const spr = this.add.image(wx, wy, 'item_food').setDisplaySize(8, 8).setDepth(2)
+    const ITEM_KEYS: Partial<Record<ItemKind, string>> = {
+      [ItemKind.Food]:  'item_food',
+      [ItemKind.Wood]:  'item_wood',
+      [ItemKind.Stone]: 'item_stone',
+    }
+    const key = ITEM_KEYS[kind]
+    if (key) {
+      const spr = this.add.image(wx, wy, key).setDisplaySize(10, 10).setDepth(2)
       gfxMap.set(eid, spr)
     } else {
       gfxMap.set(eid, this.add.graphics().setDepth(2))
