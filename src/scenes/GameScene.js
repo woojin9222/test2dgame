@@ -5,7 +5,7 @@ import Phaser from 'phaser';
 import { removeEntity } from 'bitecs';
 import { world, spawnColonist, spawnResource, spawnDroppedItem, gfxMap, overlayMap } from '../ecs/world';
 import { Resource, Position } from '../ecs/components';
-import { WorldMap, TILE_SIZE, MAP_W, MAP_H, TILE_COLORS } from '../managers/WorldMap';
+import { WorldMap, TILE_SIZE, MAP_W, MAP_H } from '../managers/WorldMap';
 import { JobQueue } from '../managers/JobQueue';
 import { GameTime } from '../managers/GameTime';
 import { BuildingManager } from '../managers/BuildingManager';
@@ -119,45 +119,33 @@ export class GameScene extends Phaser.Scene {
     }
     // ─── World rendering ─────────────────────────────────────────────────────────
     _drawTiles() {
-        // Tile variant pools per type
-        const VARIANTS = {
-            [0 /* TileType.Grass */]: ['tile_grass', 'tile_grass2', 'tile_grass3', 'tile_grass4', 'tile_grass5'],
-            [1 /* TileType.Dirt */]: ['tile_dirt', 'tile_dirt2'],
-            [2 /* TileType.Stone */]: ['tile_stone_ground', 'tile_stone_ground2', 'tile_stone_ground3'],
-            [3 /* TileType.DeepStone */]: ['tile_stone_ground', 'tile_stone_ground2'],
-            [4 /* TileType.Water */]: ['tile_water', 'tile_water2'],
+        const g = this._tileGfx;
+        g.setDepth(0);
+        // Base colors per tile type
+        const BASE = {
+            // [r, g, b]
+            [0 /* TileType.Grass */]: [58, 120, 35],
+            [1 /* TileType.Dirt */]: [140, 105, 60],
+            [2 /* TileType.Stone */]: [110, 110, 118],
+            [3 /* TileType.DeepStone */]: [60, 60, 72],
+            [4 /* TileType.Water */]: [38, 88, 180],
         };
-        if (!this.textures.exists('tile_grass')) {
-            // Fallback: colored rects
-            const g = this._tileGfx;
-            for (let ty = 0; ty < MAP_H; ty++)
-                for (let tx = 0; tx < MAP_W; tx++) {
-                    const tile = this.worldMap.getTile(tx, ty);
-                    g.fillStyle(TILE_COLORS[tile], 1);
-                    g.fillRect(tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-                }
-            return;
-        }
-        const rt = this.add.renderTexture(0, 0, MAP_W * TILE_SIZE, MAP_H * TILE_SIZE);
-        rt.setDepth(0);
         for (let ty = 0; ty < MAP_H; ty++) {
             for (let tx = 0; tx < MAP_W; tx++) {
                 const tile = this.worldMap.getTile(tx, ty);
-                const pool = VARIANTS[tile];
-                // Deterministic pseudo-random based on tile position (no frame-to-frame change)
-                const variant = pool[(tx * 7 + ty * 13) % pool.length];
-                rt.drawFrame(variant, undefined, tx * TILE_SIZE, ty * TILE_SIZE);
+                const [br, bg, bb] = BASE[tile];
+                // Deterministic per-tile brightness variation ±12
+                const n = ((tx * 1619 + ty * 31337) ^ (tx * 7 + ty * 13)) & 0xff;
+                const v = ((n % 25) - 12);
+                const r = Math.min(255, Math.max(0, br + v));
+                const gg2 = Math.min(255, Math.max(0, bg + v));
+                const b = Math.min(255, Math.max(0, bb + v));
+                const color = (r << 16) | (gg2 << 8) | b;
+                g.fillStyle(color, 1);
+                // +1 overlap to prevent sub-pixel gaps
+                g.fillRect(tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE + 1, TILE_SIZE + 1);
             }
         }
-        // DeepStone darkening overlay
-        const g = this._tileGfx;
-        g.setDepth(1);
-        for (let ty = 0; ty < MAP_H; ty++)
-            for (let tx = 0; tx < MAP_W; tx++)
-                if (this.worldMap.getTile(tx, ty) === 3 /* TileType.DeepStone */) {
-                    g.fillStyle(0x000000, 0.4);
-                    g.fillRect(tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-                }
     }
     // ─── Spawn helpers ────────────────────────────────────────────────────────────
     _spawnResources() {
